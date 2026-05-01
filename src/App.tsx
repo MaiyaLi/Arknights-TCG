@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
-import { auth, signInWithGoogle, logOut } from './firebase';
+import { auth, signInWithGoogle, logOut, db } from './firebase';
 import { onAuthStateChanged } from 'firebase/auth';
+import { doc, getDoc, setDoc } from 'firebase/firestore';
 import { AppState, UserProfile } from './types';
 import TerminalOverlay from './components/TerminalOverlay';
 import SplashScreen from './components/SplashScreen';
@@ -14,6 +15,7 @@ import SimulationScreen from './components/SimulationScreen';
 import LogisticsTerminal from './components/LogisticsTerminal';
 import TutorialScreen from './components/TutorialScreen';
 import ConflictScreen from './components/ConflictScreen';
+import SetupProfileScreen from './components/SetupProfileScreen';
 import { ErrorBoundary } from './ErrorBoundary';
 import { ALL_ASSETS } from './data/operators';
 import { getCardImagePath } from './utils/assetUtils';
@@ -46,67 +48,92 @@ export default function App() {
       const profile = JSON.parse(savedProfile) as UserProfile;
       if (profile.hasAcceptedTerms && profile.loginType === 'guest') {
         setUserProfile(profile);
+        // Sync latest from cloud if possible
+        getDoc(doc(db, 'users', profile.uid)).then(docSnap => {
+          if (docSnap.exists()) {
+            const cloudProfile = docSnap.data() as UserProfile;
+            setUserProfile(cloudProfile);
+            localStorage.setItem('arknights_profile', JSON.stringify(cloudProfile));
+          }
+        }).catch(console.error);
       }
     }
 
-    const unsubscribe = onAuthStateChanged(auth, (user) => {
+    const unsubscribe = onAuthStateChanged(auth, async (user) => {
       if (user) {
         const hasAccepted = localStorage.getItem('arknights_terms_accepted') === 'true';
-        const savedProfile = localStorage.getItem('arknights_profile');
-        let profile: UserProfile;
+        const savedProfileStr = localStorage.getItem('arknights_profile');
+        let localProfile: UserProfile | null = savedProfileStr ? JSON.parse(savedProfileStr) : null;
 
-        if (savedProfile) {
-          profile = JSON.parse(savedProfile);
-          profile.uid = user.uid;
-          profile.email = user.email;
-          profile.displayName = user.displayName;
-          // Migration for old profiles
-          if (!profile.squads) {
-            const oldSquad = (profile as any).activeSquad || [];
-            profile.squads = [[...oldSquad], [], []];
-            profile.activeSquadIndex = 0;
+        try {
+          const docRef = doc(db, 'users', user.uid);
+          const docSnap = await getDoc(docRef);
+
+          if (docSnap.exists()) {
+            const profile = docSnap.data() as UserProfile;
+            
+            // Migration for old profiles in cloud
+            if (!profile.squads) {
+              const oldSquad = (profile as any).activeSquad || [];
+              profile.squads = [[...oldSquad], [], []];
+              profile.activeSquadIndex = 0;
+            }
+            if (profile.pity5 === undefined) profile.pity5 = 0;
+            if (profile.pity6 === undefined) profile.pity6 = 0;
+            if (profile.level === undefined) profile.level = 1;
+            if (profile.exp === undefined) profile.exp = 0;
+            if ((profile.currentCurrency as any).shards !== undefined) {
+               profile.currentCurrency.orundum = (profile.currentCurrency as any).shards;
+               delete (profile.currentCurrency as any).shards;
+            }
+
+            setUserProfile(profile);
+            localStorage.setItem('arknights_profile', JSON.stringify(profile));
+            checkDailyLogin(profile);
+
+            if (!profile.hasAcceptedTerms) {
+              setAppState('TERMS');
+            } else if (!profile.hasCompletedTutorial) {
+              setAppState('TUTORIAL');
+            } else {
+              setAppState('DASHBOARD');
+            }
+          } else {
+            // New user or local migration
+            let profileToMigrate = localProfile;
+            if (!profileToMigrate || profileToMigrate.loginType !== 'guest') {
+              profileToMigrate = {
+                uid: user.uid,
+                email: user.email,
+                displayName: user.displayName,
+                hasAcceptedTerms: hasAccepted,
+                hasCompletedTutorial: false,
+                loginType: 'google',
+                currentCurrency: INITIAL_CURRENCY,
+                inventory: INITIAL_INVENTORY,
+                collection: [],
+                unlockedSkills: [],
+                squads: [[], [], []],
+                activeSquadIndex: 0,
+                lastLogin: new Date().toISOString(),
+                level: 1,
+                exp: 0,
+                loginStreak: 1,
+                lastClaimedDate: null,
+                pity5: 0,
+                pity6: 0,
+              };
+            } else {
+              profileToMigrate.uid = user.uid;
+              profileToMigrate.email = user.email;
+              profileToMigrate.loginType = 'google';
+            }
+            
+            setUserProfile(profileToMigrate);
+            setAppState('SETUP_PROFILE');
           }
-          if (profile.pity5 === undefined) profile.pity5 = 0;
-          if (profile.pity6 === undefined) profile.pity6 = 0;
-          if (profile.level === undefined) profile.level = 1;
-          if (profile.exp === undefined) profile.exp = 0;
-          if ((profile.currentCurrency as any).shards !== undefined) {
-             profile.currentCurrency.orundum = (profile.currentCurrency as any).shards;
-             delete (profile.currentCurrency as any).shards;
-          }
-        } else {
-          profile = {
-            uid: user.uid,
-            email: user.email,
-            displayName: user.displayName,
-            hasAcceptedTerms: hasAccepted,
-            hasCompletedTutorial: false,
-            loginType: 'google',
-            currentCurrency: INITIAL_CURRENCY,
-            inventory: INITIAL_INVENTORY,
-            collection: [],
-            unlockedSkills: [],
-            squads: [[], [], []],
-            activeSquadIndex: 0,
-            lastLogin: new Date().toISOString(),
-            level: 1,
-            exp: 0,
-            loginStreak: 1,
-            lastClaimedDate: null,
-            pity5: 0,
-            pity6: 0,
-          };
-        }
-        
-        setUserProfile(profile);
-        checkDailyLogin(profile);
-        
-        if (!hasAccepted) {
-          setAppState('TERMS');
-        } else if (!profile.hasCompletedTutorial) {
-          setAppState('TUTORIAL');
-        } else {
-          setAppState('DASHBOARD');
+        } catch (error) {
+          console.error("Error fetching user profile:", error);
         }
       } else {
         if (userProfile?.loginType === 'google') {
@@ -175,6 +202,20 @@ export default function App() {
     setShowRewardNotification(starterPack);
   };
 
+  const handleSetupComplete = (name: string) => {
+    if (!userProfile) return;
+    const updatedProfile = { ...userProfile, displayName: name };
+    handleUpdateProfile(updatedProfile);
+    
+    if (!updatedProfile.hasAcceptedTerms) {
+      setAppState('TERMS');
+    } else if (!updatedProfile.hasCompletedTutorial) {
+      setAppState('TUTORIAL');
+    } else {
+      setAppState('DASHBOARD');
+    }
+  };
+
   const handleStart = () => {
     setAppState('LOGIN');
   };
@@ -195,45 +236,50 @@ export default function App() {
     }
   };
 
-  const handleGuestLogin = (name?: string) => {
+  const handleGuestLogin = async (name?: string) => {
     setIsLoading(true);
-    setTimeout(() => {
-      const guestId = `GUEST_${Math.random().toString(36).substr(2, 9).toUpperCase()}`;
-      const profile: UserProfile = {
-        uid: guestId,
-        email: null,
-        displayName: name || `Operator ${guestId.split('_')[1]}`,
-        hasAcceptedTerms: localStorage.getItem('arknights_terms_accepted') === 'true',
-        hasCompletedTutorial: false,
-        loginType: 'guest',
-        currentCurrency: INITIAL_CURRENCY,
-        inventory: INITIAL_INVENTORY,
-        collection: [],
-        unlockedSkills: [],
-        squads: [[], [], []],
-        activeSquadIndex: 0,
-        lastLogin: new Date().toISOString(),
-        level: 1,
-        exp: 0,
-        loginStreak: 1,
-        lastClaimedDate: null,
-        pity5: 0,
-        pity6: 0,
-      };
-      setUserProfile(profile);
-      localStorage.setItem('arknights_profile', JSON.stringify(profile));
-      setIsLoading(false);
-      
-      checkDailyLogin(profile);
+    const guestId = `GUEST_${Math.random().toString(36).substr(2, 9).toUpperCase()}`;
+    const profile: UserProfile = {
+      uid: guestId,
+      email: null,
+      displayName: name || `Operator ${guestId.split('_')[1]}`,
+      hasAcceptedTerms: localStorage.getItem('arknights_terms_accepted') === 'true',
+      hasCompletedTutorial: false,
+      loginType: 'guest',
+      currentCurrency: INITIAL_CURRENCY,
+      inventory: INITIAL_INVENTORY,
+      collection: [],
+      unlockedSkills: [],
+      squads: [[], [], []],
+      activeSquadIndex: 0,
+      lastLogin: new Date().toISOString(),
+      level: 1,
+      exp: 0,
+      loginStreak: 1,
+      lastClaimedDate: null,
+      pity5: 0,
+      pity6: 0,
+    };
 
-      if (!profile.hasAcceptedTerms) {
-        setAppState('TERMS');
-      } else if (!profile.hasCompletedTutorial) {
-        setAppState('TUTORIAL');
-      } else {
-        setAppState('DASHBOARD');
-      }
-    }, 3000); // Simulate loading
+    setUserProfile(profile);
+    localStorage.setItem('arknights_profile', JSON.stringify(profile));
+    setIsLoading(false);
+    
+    try {
+      await setDoc(doc(db, 'users', profile.uid), profile, { merge: true });
+    } catch (e) {
+      console.error(e);
+    }
+    
+    checkDailyLogin(profile);
+
+    if (!profile.hasAcceptedTerms) {
+      setAppState('TERMS');
+    } else if (!profile.hasCompletedTutorial) {
+      setAppState('TUTORIAL');
+    } else {
+      setAppState('DASHBOARD');
+    }
   };
 
   const handleGoogleLogin = async () => {
@@ -259,6 +305,10 @@ export default function App() {
   const handleUpdateProfile = (profile: UserProfile) => {
     setUserProfile(profile);
     localStorage.setItem('arknights_profile', JSON.stringify(profile));
+    
+    setDoc(doc(db, 'users', profile.uid), profile, { merge: true }).catch(e => {
+      console.error("Failed to sync profile to cloud", e);
+    });
   };
 
   const handleWinMatch = (type: 'SIM' | 'PVP') => {
@@ -284,7 +334,7 @@ export default function App() {
     handleUpdateProfile(profile);
   };
 
-  const showNav = userProfile && !['SPLASH', 'TERMS', 'LOGIN', 'SIMULATION', 'CONFLICT', 'TUTORIAL'].includes(appState);
+  const showNav = userProfile && !['SPLASH', 'TERMS', 'LOGIN', 'SIMULATION', 'CONFLICT', 'TUTORIAL', 'SETUP_PROFILE'].includes(appState);
 
   return (
     <div className="relative min-h-screen bg-black flex justify-center items-center overflow-hidden">
@@ -311,6 +361,15 @@ export default function App() {
                   onGuestLogin={handleGuestLogin} 
                   onGoogleLogin={handleGoogleLogin} 
                   isLoading={isLoading} 
+                />
+              </motion.div>
+            )}
+
+            {appState === 'SETUP_PROFILE' && userProfile && (
+              <motion.div key="setup" initial={{ opacity: 0, scale: 0.9 }} animate={{ opacity: 1, scale: 1 }} className="h-full">
+                <SetupProfileScreen 
+                  initialName={userProfile.displayName || ''}
+                  onComplete={handleSetupComplete}
                 />
               </motion.div>
             )}

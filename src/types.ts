@@ -29,4 +29,4 @@ export interface UserProfile {
   pity6: number; // Counter for 6-star pity (guaranteed at 90)
 }
 
-export type AppState = 'SPLASH' | 'TERMS' | 'LOGIN' | 'LOADING' | 'DASHBOARD' | 'HEADHUNTING' | 'PERSONNEL' | 'SIMULATION' | 'SHOP' | 'TUTORIAL';
+export type AppState = 'SPLASH' | 'TERMS' | 'LOGIN' | 'LOADING' | 'DASHBOARD' | 'HEADHUNTING' | 'PERSONNEL' | 'SIMULATION' | 'SHOP' | 'TUTORIAL' | 'CONFLICT' | 'SETUP_PROFILE';
