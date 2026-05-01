@@ -123,7 +123,7 @@ export default function ConflictScreen({ userProfile, onUpdateProfile, onBack, o
 
   // Initialize Socket
   useEffect(() => {
-    const s = io();
+    const s = io(import.meta.env.VITE_BACKEND_URL || undefined);
     setSocket(s);
 
     s.on('match_found', ({ matchId, side: sSide, opponent }) => {
