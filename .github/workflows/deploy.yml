@@ -23,5 +23,6 @@ jobs:
       - name: Deploy to Firebase Hosting
         run: |
           echo '${{ secrets.FIREBASE_SERVICE_ACCOUNT }}' > service-account.json
+          ls -la service-account.json
           export GOOGLE_APPLICATION_CREDENTIALS=service-account.json
-          ./node_modules/.bin/firebase deploy --only hosting --non-interactive
+          ./node_modules/.bin/firebase deploy --only hosting --non-interactive --project gen-lang-client-0640114821 --debug
