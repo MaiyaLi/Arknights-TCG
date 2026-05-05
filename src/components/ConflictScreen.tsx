@@ -1,560 +1,345 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { io, Socket } from 'socket.io-client';
 import { 
   ChevronLeft, 
-  Pause, 
   Play, 
   RotateCcw, 
-  Zap, 
-  Heart,
-  Trash2,
-  Star,
-  Search,
-  Swords,
-  Loader2
+  Zap,
+  Loader2,
+  Sword,
+  Target,
+  Shield,
+  Activity,
+  User,
+  LogOut
 } from 'lucide-react';
+import { supabase } from '../supabase';
 import { UserProfile } from '../types';
-import { ALL_ASSETS, AI_ENEMIES, Operator } from '../data/operators';
-import { getSpriteImagePath, getCardImagePath } from '../utils/assetUtils';
+import { ALL_ASSETS, Operator } from '../data/operators';
+import { BattleKernel } from '../game/BattleKernel';
+import { getCardImagePath } from '../utils/assetUtils';
+import { RealtimeChannel } from '@supabase/supabase-js';
+
+const CANVAS_W = 400;
+const CANVAS_H = 600;
 
 interface ConflictScreenProps {
   userProfile: UserProfile;
-  onUpdateProfile: (profile: UserProfile) => void;
+  onUpdateProfile: (p: UserProfile) => void;
   onBack: () => void;
   onVictory: () => void;
 }
 
-interface FloatingLabel {
-  id: string;
-  x: number;
-  y: number;
-  value: string;
-  type: 'DAMAGE' | 'HEAL' | 'STUN' | 'CRIT' | 'TRUE';
-  life: number;
-}
-
 export default function ConflictScreen({ userProfile, onUpdateProfile, onBack, onVictory }: ConflictScreenProps) {
-  const [socket, setSocket] = useState<Socket | null>(null);
-  const [matchState, setMatchState] = useState<any>(null);
-  const [side, setSide] = useState<'PLAYER' | 'OPPONENT'>('PLAYER');
+  const [matchId, setMatchId] = useState<string | null>(null);
+  const [side, setSide] = useState<'PLAYER' | 'OPPONENT' | null>(null);
   const [isQueuing, setIsQueuing] = useState(false);
   const [playerReady, setPlayerReady] = useState(false);
   const [opponentReady, setOpponentReady] = useState(false);
+  const [matchResult, setMatchResult] = useState<'VICTORY' | 'DEFEAT' | null>(null);
 
-  // Simulation-style states
+  const [channel, setChannel] = useState<RealtimeChannel | null>(null);
+  const [isHost, setIsHost] = useState(false);
+  const kernelRef = useRef<BattleKernel | null>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
+
+  const [matchState, setMatchState] = useState({
+    id: '',
+    units: [] as any[],
+    phase: 'COMMAND' as any,
+    turn: 0,
+    playerDP: 15,
+    opponentDP: 15,
+    playerLP: 3,
+    opponentLP: 3,
+  });
+
   const [playerHand, setPlayerHand] = useState<Operator[]>([]);
   const [playerDeck, setPlayerDeck] = useState<Operator[]>([]);
-  const [playerCooldowns, setPlayerCooldowns] = useState<{ op: Operator, turnsRemaining: number }[]>([]);
+  const [playerCooldowns, setPlayerCooldowns] = useState<{ id: string, turnsRemaining: number }[]>([]);
   const [mulliganPhase, setMulliganPhase] = useState(false);
   const [mulliganSelected, setMulliganSelected] = useState<number[]>([]);
-  const [selectedLane, setSelectedLane] = useState<number | null>(null);
-  const [selectedRow, setSelectedRow] = useState<number | null>(null);
+
   const [draggingOp, setDraggingOp] = useState<{ op: Operator, index: number } | null>(null);
   const [dragPos, setDragPos] = useState({ x: 0, y: 0 });
-  const [selectedUnit, setSelectedUnit] = useState<any | null>(null);
-  const [selectedSlot, setSelectedSlot] = useState<{ lane: number, row: number } | null>(null);
-  const [swapSourceId, setSwapSourceId] = useState<string | null>(null);
-  
-  const lastDragTime = useRef<number>(0);
-  const floatingLabels = useRef<FloatingLabel[]>([]);
-  const spriteImages = useRef<Record<string, HTMLImageElement>>({});
+  const [selectedLane, setSelectedLane] = useState<number | null>(null);
+  const [selectedRow, setSelectedRow] = useState<number | null>(null);
 
-  const startQueuing = () => {
-    if (!socket) return;
+  const floatingLabels = useRef<{ id: string, x: number, y: number, value: string, type: string, life: number }[]>([]);
+
+  useEffect(() => {
+    if (!matchId) joinLobby();
+    return () => {
+      channel?.unsubscribe();
+    };
+  }, []);
+
+  const joinLobby = async () => {
     setIsQueuing(true);
-    socket.emit('join_queue', { userId: userProfile.id, name: userProfile.name, squad: [] });
+    const lobbyChannel = supabase.channel('lobby', { config: { presence: { key: userProfile.uid } } });
+
+    lobbyChannel
+      .on('presence', { event: 'sync' }, () => {
+        const state = lobbyChannel.presenceState();
+        const users = Object.keys(state).sort();
+        if (users.length >= 2) {
+          const pair = users.slice(0, 2);
+          if (pair.includes(userProfile.uid)) {
+            const mId = `match_${pair.join('_')}`;
+            setMatchId(mId);
+            setSide(pair[0] === userProfile.uid ? 'PLAYER' : 'OPPONENT');
+            startMatch(mId, pair[0] === userProfile.uid);
+            lobbyChannel.unsubscribe();
+          }
+        }
+      })
+      .subscribe(async (status) => {
+        if (status === 'SUBSCRIBED') {
+          await lobbyChannel.track({ user_id: userProfile.uid, name: userProfile.displayName });
+        }
+      });
   };
 
-  const cancelQueuing = () => {
-    if (!socket) return;
+  const startMatch = (mId: string, amIHost: boolean) => {
     setIsQueuing(false);
-    socket.emit('leave_queue', { userId: userProfile.id });
+    const squad = userProfile.squads[userProfile.activeSquadIndex];
+    const operators = squad.map(id => ALL_ASSETS.find(a => a.id === id)).filter(Boolean) as Operator[];
+    const shuffled = [...operators].sort(() => Math.random() - 0.5);
+    setPlayerHand(shuffled.slice(0, 4));
+    setPlayerDeck(shuffled.slice(4));
+    
+    const mySide = amIHost ? 'PLAYER' : 'OPPONENT';
+    setIsHost(amIHost);
+    setMulliganPhase(true);
+
+    const matchChannel = supabase.channel(mId);
+
+    if (amIHost) {
+      const kernel = new BattleKernel(
+        (winner) => {
+          matchChannel.send({ type: 'broadcast', event: 'game_over', payload: { winner } });
+          syncMatchState(matchChannel);
+        },
+        () => {},
+        () => {},
+        (phase) => {
+          matchChannel.send({ type: 'broadcast', event: 'phase_change', payload: phase });
+          syncMatchState(matchChannel);
+        },
+        (turn) => {
+          matchChannel.send({ type: 'broadcast', event: 'turn_start', payload: turn });
+          syncMatchState(matchChannel);
+        },
+        (lane, row, value, type) => matchChannel.send({ type: 'broadcast', event: 'combat_event', payload: { lane, row, value, type } })
+      );
+      kernel.start();
+      kernelRef.current = kernel;
+    }
+
+    matchChannel
+      .on('broadcast', { event: 'deploy_unit' }, ({ payload }) => {
+        if (amIHost && kernelRef.current) {
+          const kernelOwner = (payload.side === 'PLAYER' ? 'PLAYER' : 'AI');
+          const op = ALL_ASSETS.find(a => a.id === payload.opId);
+          if (op) {
+            kernelRef.current.deployUnit(op, kernelOwner, payload.lane, payload.row);
+            syncMatchState(matchChannel);
+          }
+        }
+      })
+      .on('broadcast', { event: 'authorize_ready' }, ({ payload }) => {
+        if (amIHost && kernelRef.current) {
+          if (payload.side === 'PLAYER') setPlayerReady(true);
+          else setOpponentReady(true);
+        }
+      })
+      .on('broadcast', { event: 'match_sync' }, ({ payload }) => {
+        if (!amIHost) setMatchState(payload);
+      })
+      .on('broadcast', { event: 'ready_sync' }, ({ payload }) => {
+        if (!amIHost) {
+          setPlayerReady(mySide === 'PLAYER' ? payload.playerReady : payload.opponentReady);
+          setOpponentReady(mySide === 'PLAYER' ? payload.opponentReady : payload.playerReady);
+        }
+      })
+      .on('broadcast', { event: 'combat_event' }, ({ payload }) => {
+        if (!amIHost) handleCombatEvent(payload);
+      })
+      .on('broadcast', { event: 'game_over' }, ({ payload }) => {
+        const iWon = (mySide === 'PLAYER' && payload.winner === 'PLAYER') || (mySide === 'OPPONENT' && payload.winner === 'AI');
+        if (iWon) onVictory();
+        setMatchResult(iWon ? 'VICTORY' : 'DEFEAT');
+      })
+      .subscribe();
+
+    setChannel(matchChannel);
   };
 
-  // 2.5D Projection (Simulation Screen Style)
-  const CANVAS_W = 450;
-  const CANVAS_H = 400;
-  const PROJECT_CONFIG = {
-    topY: 100,
-    bottomY: 320,
-    topWidth: 220,
-    bottomWidth: 420,
-    zFactor: 1.3
+  const syncMatchState = (chan: RealtimeChannel) => {
+    if (!kernelRef.current) return;
+    const state = {
+      id: chan.topic,
+      units: kernelRef.current.units,
+      phase: kernelRef.current.phase,
+      turn: kernelRef.current.turnCount,
+      playerDP: kernelRef.current.playerDP,
+      opponentDP: kernelRef.current.aiDP,
+      playerLP: kernelRef.current.playerLP,
+      opponentLP: kernelRef.current.aiLP,
+    };
+    setMatchState(state);
+    chan.send({ type: 'broadcast', event: 'match_sync', payload: state });
   };
 
-  const project = (l: number, r: number, z = 0) => {
-    const linearProgress = Math.max(-0.1, r / 6);
-    const progress = Math.pow(Math.abs(linearProgress), PROJECT_CONFIG.zFactor) * (linearProgress < 0 ? -1 : 1);
-    const currY = PROJECT_CONFIG.topY + progress * (PROJECT_CONFIG.bottomY - PROJECT_CONFIG.topY);
-    const currW = PROJECT_CONFIG.topWidth + linearProgress * (PROJECT_CONFIG.bottomWidth - PROJECT_CONFIG.topWidth);
-    const startX = (CANVAS_W - currW) / 2;
-    const currX = startX + (l + 0.5) * (currW / 3);
-    return { x: currX, y: currY - z };
+  const handleCombatEvent = ({ lane, row, value, type }: any) => {
+    const displayRow = toDisplayRowRef(row);
+    const pos = project(lane, displayRow, 10);
+    const id = Math.random().toString(36).substr(2, 9);
+    floatingLabels.current.push({ id, x: pos.x + (Math.random()-0.5)*30, y: pos.y + (Math.random()-0.5)*15, value: value > 0 ? value.toString() : '', type, life: 1.0 });
+  };
+
+  useEffect(() => {
+    if (isHost && playerReady && opponentReady) {
+      setPlayerReady(false);
+      setOpponentReady(false);
+      kernelRef.current?.executeStrategy();
+      setTimeout(() => { if (channel) syncMatchState(channel); }, 3000);
+      channel?.send({ type: 'broadcast', event: 'ready_sync', payload: { playerReady: false, opponentReady: false } });
+    }
+  }, [playerReady, opponentReady]);
+
+  const handleAuthorize = () => {
+    setPlayerReady(true);
+    channel?.send({ type: 'broadcast', event: 'authorize_ready', payload: { side } });
+    if (!isHost) {
+      channel?.send({ type: 'broadcast', event: 'ready_sync', payload: { playerReady: side === 'PLAYER', opponentReady: side === 'OPPONENT' } });
+    }
+  };
+
+  const handleDeploy = (op: Operator, lane: number, row: number) => {
+    const cost = op.dp_cost;
+    const currentDP = side === 'PLAYER' ? matchState.playerDP : matchState.opponentDP;
+    if (currentDP < cost) return;
+
+    channel?.send({ type: 'broadcast', event: 'deploy_unit', payload: { opId: op.id, lane, row: toKernelRow(row), side } });
+    
+    setPlayerHand(prev => prev.filter(p => p.id !== op.id));
+    // Draw next
+    if (playerDeck.length > 0) {
+      const next = playerDeck[0];
+      setPlayerHand(prev => [...prev, next]);
+      setPlayerDeck(prev => prev.slice(1));
+    }
+  };
+
+  const toKernelRow = (displayRow: number) => {
+    return side === 'PLAYER' ? displayRow : 6 - displayRow;
+  };
+
+  const toDisplayRowRef = (kernelRow: number) => {
+    return side === 'PLAYER' ? kernelRow : 6 - kernelRow;
+  };
+
+  const project = (lane: number, row: number, offset: number = 0) => {
+    const laneW = CANVAS_W / 3;
+    const rowH = CANVAS_H / 7;
+    return {
+      x: lane * laneW + laneW / 2,
+      y: row * rowH + rowH / 2 + offset
+    };
   };
 
   const unproject = (x: number, y: number) => {
-    let minDist = 1600;
-    let nearest = { lane: -1, row: -1 };
-    for (let r = 0; r < 7; r++) {
-      for (let l = 0; l < 3; l++) {
-        const p = project(l, r);
-        const d = Math.pow(p.x - x, 2) + Math.pow(p.y - y, 2);
-        if (d < minDist) {
-          minDist = d;
-          nearest = { lane: l, row: r };
-        }
-      }
-    }
-    return nearest.lane === -1 ? { lane: null, row: null } : nearest;
+    const lane = Math.floor(x / (CANVAS_W / 3));
+    const row = Math.floor(y / (CANVAS_H / 7));
+    return { lane: Math.max(0, Math.min(2, lane)), row: Math.max(0, Math.min(6, row)) };
   };
 
-  // Helper: map server row to display row based on side
-  // Goal: You are ALWAYS at the bottom (Blue side).
-  // If side === PLAYER: displayRow = serverRow.
-  // If side === OPPONENT: displayRow = 6 - serverRow (because serverRow 0 is your goal, which we want at bottom 6).
-  const sideRef = useRef<'PLAYER' | 'OPPONENT'>('PLAYER');
-  useEffect(() => { sideRef.current = side; }, [side]);
-
-  const toDisplayRow = (serverRow: number) => side === 'PLAYER' ? serverRow : 6 - serverRow;
-  const toDisplayRowRef = (serverRow: number) => sideRef.current === 'PLAYER' ? serverRow : 6 - serverRow;
-  const toServerRow = (displayRow: number) => side === 'PLAYER' ? displayRow : 6 - displayRow;
-
-  // Initialize Socket
   useEffect(() => {
-    const s = io(import.meta.env.VITE_BACKEND_URL || undefined);
-    setSocket(s);
-
-    s.on('match_found', ({ matchId, side: sSide, opponent }) => {
-      setSide(sSide);
-      setIsQueuing(false);
-      setMulliganPhase(true); // Start with mulligan phase just like simulation
-      s.emit('join_match', matchId);
-    });
-
-    s.on('match_sync', (state) => {
-      setMatchState((prev: any) => {
-         // Handle unit removal/cooldown logic if phase changed to COMMAND
-         if (prev && prev.phase === 'ACTION' && state.phase === 'COMMAND') {
-             // Turn transition: Update local cooldowns
-             setPlayerCooldowns(c => c.map(item => ({ ...item, turnsRemaining: item.turnsRemaining - 1 })).filter(item => {
-                if (item.turnsRemaining <= 0) {
-                   setPlayerDeck(d => [...d, item.op]);
-                   return false;
-                }
-                return true;
-             }));
-         }
-         return state;
-      });
-    });
-
-    s.on('ready_sync', ({ playerReady: pr, opponentReady: or }) => {
-      if (sideRef.current === 'PLAYER') {
-        setPlayerReady(pr);
-        setOpponentReady(or);
-      } else {
-        setPlayerReady(or);
-        setOpponentReady(pr);
-      }
-    });
-
-    s.on('combat_event', ({ lane, row, value, type }) => {
-      const displayRow = toDisplayRowRef(row);
-      const pos = project(lane, displayRow, 10);
-      const id = Math.random().toString(36).substr(2, 9);
-      floatingLabels.current.push({
-        id,
-        x: pos.x + (Math.random()-0.5)*30,
-        y: pos.y + (Math.random()-0.5)*15,
-        value: value > 0 ? value.toString() : '',
-        type,
-        life: 1.0
-      });
-    });
-
-    return () => { s.disconnect(); };
-  }, []);
-
-  // Squad Initialization
-  useEffect(() => {
-    const squad = userProfile.squads[userProfile.activeSquadIndex]
-      .map(id => ALL_ASSETS.find(a => a.id === id))
-      .filter(Boolean) as Operator[];
-    const shuffled = [...squad].sort(() => Math.random() - 0.5);
-    setPlayerHand(shuffled.slice(0, 4));
-    setPlayerDeck(shuffled.slice(4));
-
-    // Pre-load Sprites
-    [...ALL_ASSETS, ...AI_ENEMIES].forEach(op => {
-      ['Front', 'Back'].forEach(view => {
-        const path = getSpriteImagePath(op, view as 'Front' | 'Back');
-        if (!spriteImages.current[`${op.id}_${view}`]) {
-           const img = new Image();
-           img.src = path;
-           spriteImages.current[`${op.id}_${view}`] = img;
-        }
-      });
-    });
-  }, [userProfile]);
-
-  // Interaction Handlers
-  const handleDeploy = (op: Operator, lane: number, row: number) => {
-    if (!socket || !matchState) return;
-    const serverRow = toServerRow(row);
-    socket.emit('deploy_unit', { matchId: matchState.id, opId: op.id, lane, row: serverRow, side });
-    setPlayerHand(prev => prev.filter((_, i) => i !== draggingOp?.index));
-  };
-
-  const handleAuthorize = () => {
-    if (!socket || !matchState) return;
-    socket.emit('authorize_ready', { matchId: matchState.id, side });
-  };
-
-  // Render Loop
-  useEffect(() => {
-    if (!matchState || !canvasRef.current) return;
-    const ctx = canvasRef.current.getContext('2d');
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
     if (!ctx) return;
 
-    let animFrame: number;
+    let animId: number;
     const render = () => {
       ctx.clearRect(0, 0, CANVAS_W, CANVAS_H);
-
-      // Draw Atmospheric Background (Holographic Grid)
-      ctx.strokeStyle = 'rgba(0, 152, 217, 0.05)';
-      ctx.lineWidth = 0.5;
-      const gridRows = 12;
-      const gridCols = 8;
-      for (let i = 0; i <= gridRows; i++) {
-          const pStart = project(-1.5, i * (7 / gridRows) - 0.5);
-          const pEnd = project(3.5, i * (7 / gridRows) - 0.5);
-          ctx.beginPath();
-          ctx.moveTo(pStart.x, pStart.y);
-          ctx.lineTo(pEnd.x, pEnd.y);
-          ctx.stroke();
-      }
-      for (let i = 0; i <= gridCols; i++) {
-          const pStart = project(i * (5 / gridCols) - 1.5, -0.5);
-          const pEnd = project(i * (5 / gridCols) - 1.5, 6.5);
-          ctx.beginPath();
-          ctx.moveTo(pStart.x, pStart.y);
-          ctx.lineTo(pEnd.x, pEnd.y);
-          ctx.stroke();
-      }
-
-      // Draw Vertical Scanning Waves
-      const time = Date.now() / 2000;
-      for (let i = 0; i < 2; i++) {
-          const rPos = ((time + i * 0.5) % 1) * 7 - 0.5;
-          const pS = project(-1, rPos);
-          const pE = project(3, rPos);
-          ctx.strokeStyle = `rgba(0, 152, 217, ${0.1 * (1 - rPos/7)})`;
-          ctx.beginPath();
-          ctx.moveTo(pS.x, pS.y);
-          ctx.lineTo(pE.x, pE.y);
-          ctx.stroke();
-      }
-
-      // Draw Tactical Environment (Floating Platforms)
-      for (let r = 0; r < 7; r++) {
-        for (let l = 0; l < 3; l++) {
-          const isSelected = selectedLane === l && selectedRow === r;
-          const canDeploy = (r === 4 || r === 5); // Fixed for local perspective
-          const isOccupied = matchState.units.some((u: any) => u.lane === l && toDisplayRow(u.row) === r);
-          
-          const isPlaceable = draggingOp && canDeploy && !isOccupied;
-          const isInvalid = draggingOp && (!canDeploy || isOccupied);
-          
-          // Platform "Pad" sizes - strictly independent
-          const padSize = isSelected ? 0.43 : 0.4; 
-          
-          const center = project(l, r);
-          const p0 = project(l - padSize, r - padSize);
-          const p1 = project(l + padSize, r - padSize);
-          const p2 = project(l + padSize, r + padSize);
-          const p3 = project(l - padSize, r + padSize);
-
-          // Side Depth for the Platform
-          const baseHeight = (r === 0 || r === 6) ? 6 : 4;
-          const p0d = { x: p0.x, y: p0.y + baseHeight };
-          const p1d = { x: p1.x, y: p1.y + baseHeight };
-          const p2d = { x: p2.x, y: p2.y + baseHeight };
-          const p3d = { x: p3.x, y: p3.y + baseHeight };
-
-          // Draw Sides (Front and Right with lighting)
-          let sideColor = isSelected 
-            ? 'rgba(0, 255, 231, 0.4)' 
-            : (isPlaceable ? 'rgba(0, 152, 217, 0.25)' : 'rgba(0, 152, 217, 0.1)');
-          
-          if (isInvalid) {
-            sideColor = 'rgba(255, 59, 59, 0.15)';
-          }
-          
-          ctx.fillStyle = sideColor;
-          ctx.beginPath();
-          ctx.moveTo(p3.x, p3.y); ctx.lineTo(p2.x, p2.y); ctx.lineTo(p2d.x, p2d.y); ctx.lineTo(p3d.x, p3d.y);
-          ctx.closePath();
-          ctx.fill();
-
-          ctx.fillStyle = isSelected 
-            ? 'rgba(0, 255, 231, 0.3)' 
-            : (isPlaceable ? 'rgba(0, 152, 217, 0.2)' : 'rgba(0, 152, 217, 0.05)');
-          ctx.beginPath();
-          ctx.moveTo(p2.x, p2.y); ctx.lineTo(p1.x, p1.y); ctx.lineTo(p1d.x, p1d.y); ctx.lineTo(p2d.x, p2d.y);
-          ctx.closePath();
-          ctx.fill();
-
-          // Draw Top Surface
-          let surfaceColor = isSelected 
-            ? 'rgba(0, 152, 217, 0.4)' 
-            : (isPlaceable ? 'rgba(0, 152, 217, 0.2)' : 'rgba(10, 10, 20, 0.98)');
-          
-          let borderColor = isSelected 
-            ? 'rgba(0, 255, 231, 1)' 
-            : (isPlaceable ? 'rgba(0, 255, 231, 1)' : 'rgba(0, 152, 217, 0.15)');
-
-          if (isInvalid) {
-            surfaceColor = 'rgba(255, 59, 59, 0.05)';
-            borderColor = 'rgba(255, 59, 59, 0.2)';
-          }
-
-          if (r === 0) {
-            // ENEMY GOAL (RED BOX)
-            surfaceColor = isSelected ? 'rgba(255, 59, 59, 0.8)' : (isInvalid ? 'rgba(255, 59, 59, 0.2)' : 'rgba(255, 59, 59, 0.4)');
-            borderColor = 'rgba(255, 0, 0, 1)';
-            
-            // Add Holographic Pillar effect for Goal
-            const pPillar = project(l, r, 20);
-            const pillarGrad = ctx.createLinearGradient(0, center.y, 0, pPillar.y);
-            pillarGrad.addColorStop(0, 'rgba(255, 59, 59, 0.3)');
-            pillarGrad.addColorStop(1, 'rgba(255, 59, 59, 0)');
-            ctx.fillStyle = pillarGrad;
-            ctx.beginPath();
-            ctx.moveTo(p0.x, p0.y); ctx.lineTo(p1.x, p1.y);
-            ctx.lineTo(pPillar.x + 10, pPillar.y); ctx.lineTo(pPillar.x - 10, pPillar.y);
-            ctx.closePath();
-            ctx.fill();
-
-            // Add portal lines
-            ctx.strokeStyle = 'rgba(255, 255, 255, 0.5)';
-            ctx.lineWidth = 1.5;
-            ctx.beginPath();
-            ctx.moveTo(p0.x, p0.y); ctx.lineTo(p2.x, p2.y);
-            ctx.moveTo(p1.x, p1.y); ctx.lineTo(p3.x, p3.y);
-            ctx.stroke();
-          } else if (r === 6) {
-            // PLAYER GOAL (BLUE BOX)
-            surfaceColor = isSelected ? 'rgba(0, 255, 231, 0.7)' : (isInvalid ? 'rgba(255, 59, 59, 0.2)' : 'rgba(0, 255, 231, 0.4)');
-            borderColor = 'rgba(0, 255, 231, 1)';
-            
-            // Add Holographic Pillar effect
-            const pPillar = project(l, r, 20);
-            const pillarGrad = ctx.createLinearGradient(0, center.y, 0, pPillar.y);
-            pillarGrad.addColorStop(0, 'rgba(0, 255, 231, 0.3)');
-            pillarGrad.addColorStop(1, 'rgba(0, 255, 231, 0)');
-            ctx.fillStyle = pillarGrad;
-            ctx.beginPath();
-            ctx.moveTo(p3.x, p3.y); ctx.lineTo(p2.x, p2.y);
-            ctx.lineTo(pPillar.x + 15, pPillar.y); ctx.lineTo(pPillar.x - 15, pPillar.y);
-            ctx.closePath();
-            ctx.fill();
-
-            // Add portal lines
-            ctx.strokeStyle = 'rgba(255, 255, 255, 0.5)';
-            ctx.lineWidth = 1.5;
-            ctx.beginPath();
-            ctx.moveTo(p0.x, p0.y); ctx.lineTo(p2.x, p2.y);
-            ctx.moveTo(p1.x, p1.y); ctx.lineTo(p3.x, p3.y);
-            ctx.stroke();
-          } else if (r === 3) {
-            if (!isSelected && !isPlaceable && !isInvalid) surfaceColor = 'rgba(255, 255, 255, 0.1)';
-          }
-
-          ctx.fillStyle = surfaceColor;
-          ctx.beginPath();
-          ctx.moveTo(p0.x, p0.y); ctx.lineTo(p1.x, p1.y); ctx.lineTo(p2.x, p2.y); ctx.lineTo(p3.x, p3.y);
-          ctx.closePath();
-          ctx.fill();
-
-          // Surface Rim
-          ctx.strokeStyle = borderColor;
-          ctx.lineWidth = isSelected ? 2.5 : (isPlaceable ? 2 : 0.8);
-          ctx.stroke();
-
-          // Invalid Feedback (Red Pulse or X)
-          if (isInvalid && isSelected) {
-            ctx.strokeStyle = '#ff3b3b';
-            ctx.lineWidth = 2;
-            ctx.beginPath();
-            ctx.moveTo(p0.x + 5, p0.y + 5); ctx.lineTo(p2.x - 5, p2.y - 5);
-            ctx.moveTo(p1.x - 5, p1.y + 5); ctx.lineTo(p3.x + 5, p3.y - 5);
-            ctx.stroke();
-          }
-
-          // Guide Pulse for placeable tiles - EXTREME TACTICAL VISIBILITY
-          if (isPlaceable) {
-              const pulse = (Math.sin(Date.now() / 150) + 1) / 2;
-              
-              // 1. Ground Tactical Zone
-              ctx.fillStyle = `rgba(0, 255, 231, ${0.1 + 0.15 * pulse})`;
-              ctx.beginPath();
-              ctx.moveTo(p0.x, p0.y); ctx.lineTo(p1.x, p1.y); ctx.lineTo(p2.x, p2.y); ctx.lineTo(p3.x, p3.y);
-              ctx.closePath();
-              ctx.fill();
-
-              // 2. Animated Scanning Beam
-              const beamHeight = 40;
-              const pBeam = project(l, r, beamHeight);
-              const beamGrad = ctx.createLinearGradient(0, center.y, 0, pBeam.y);
-              beamGrad.addColorStop(0, `rgba(0, 255, 231, ${0.4 * pulse})`);
-              beamGrad.addColorStop(1, 'rgba(0, 255, 231, 0)');
-              
-              ctx.strokeStyle = `rgba(0, 255, 231, ${0.6 * pulse})`;
-              ctx.lineWidth = 1;
-              ctx.strokeRect(center.x - 10 * pulse, pBeam.y, 20 * pulse, 1);
-              
-              ctx.fillStyle = beamGrad;
-              ctx.beginPath();
-              ctx.moveTo(p0.x, p0.y); ctx.lineTo(p1.x, p1.y);
-              ctx.lineTo(pBeam.x + 8, pBeam.y); ctx.lineTo(pBeam.x - 8, pBeam.y);
-              ctx.closePath();
-              ctx.fill();
-
-              // 3. Thick Animated Border
-              ctx.strokeStyle = `rgba(0, 255, 231, ${0.4 + 0.5 * pulse})`;
-              ctx.lineWidth = 2.5;
-              ctx.setLineDash([8, 4]);
-              ctx.lineDashOffset = -Date.now() / 30;
-              ctx.beginPath();
-              ctx.moveTo(p0.x, p0.y); ctx.lineTo(p1.x, p1.y); ctx.lineTo(p2.x, p2.y); ctx.lineTo(p3.x, p3.y);
-              ctx.closePath();
-              ctx.stroke();
-              ctx.setLineDash([]);
-          }
-
-          // Selected Crosshair
-          if (isSelected) {
-            ctx.strokeStyle = '#fff';
-            ctx.lineWidth = 1;
-            ctx.beginPath();
-            ctx.moveTo(center.x - 10, center.y); ctx.lineTo(center.x + 10, center.y);
-            ctx.moveTo(center.x, center.y - 6); ctx.lineTo(center.x, center.y + 6);
-            ctx.stroke();
-            
-            // Corner accents
-            [p0, p1, p2, p3].forEach((p, i) => {
-              const angle = (i * Math.PI) / 2 + Math.PI / 4;
-              ctx.beginPath();
-              ctx.arc(p.x, p.y, 4, 0, Math.PI * 2);
-              ctx.stroke();
-            });
-          }
-
-          // Technical Label
-          if (r === 6 || r === 0 || isSelected) {
-            ctx.fillStyle = 'rgba(255,255,255,0.3)';
-            ctx.font = '700 6px monospace';
-            ctx.fillText(`SEC ${l}-${r}`, center.x, center.y + (padSize * 20) + 10);
-          }
-        }
-      }
-
-      // Goal Accents
-      const aiBase = project(1, 0.2); // Move labels further onto the visible map
-      const plBase = project(1, 5.8);
       
-      ctx.font = '900 10px monospace';
-      ctx.textAlign = 'center';
-      ctx.fillStyle = 'rgba(255, 59, 59, 0.9)';
-      ctx.shadowBlur = 5;
-      ctx.shadowColor = '#ff3b3b';
-      ctx.fillText('SIGNAL HOSTILE // ELIMINATION TARGET', aiBase.x, aiBase.y - 45);
-      ctx.fillStyle = 'rgba(0, 255, 231, 0.9)';
-      ctx.shadowColor = '#00ffe7';
-      ctx.fillText('SIGNAL FRIENDLY // CORE SYNC', plBase.x, plBase.y + 45);
-      ctx.shadowBlur = 0;
+      // Grid
+      ctx.strokeStyle = 'rgba(25, 186, 255, 0.1)';
+      ctx.lineWidth = 1;
+      for (let i = 1; i < 3; i++) {
+        ctx.beginPath(); ctx.moveTo(i * (CANVAS_W/3), 0); ctx.lineTo(i * (CANVAS_W/3), CANVAS_H); ctx.stroke();
+      }
+      for (let i = 1; i < 7; i++) {
+        ctx.beginPath(); ctx.moveTo(0, i * (CANVAS_H/7)); ctx.lineTo(CANVAS_W, i * (CANVAS_H/7)); ctx.stroke();
+      }
+
+      // Zones
+      ctx.fillStyle = 'rgba(25, 186, 255, 0.05)';
+      ctx.fillRect(0, 5 * (CANVAS_H/7), CANVAS_W, CANVAS_H/7); // Deploy Front
+      ctx.fillRect(0, 4 * (CANVAS_H/7), CANVAS_W, CANVAS_H/7); // Deploy Back
+
+      // Selection
+      if (selectedLane !== null && selectedRow !== null) {
+        ctx.fillStyle = 'rgba(25, 186, 255, 0.2)';
+        ctx.fillRect(selectedLane * (CANVAS_W/3), selectedRow * (CANVAS_H/7), CANVAS_W/3, CANVAS_H/7);
+      }
 
       // Units
-      matchState.units.forEach((u: any) => {
-        const displayRow = toDisplayRow(u.row);
-        const basePos = project(u.lane, displayRow, 0);
-        const mainColor = u.owner === (side === 'PLAYER' ? 'PLAYER' : 'AI') ? '#00ffe7' : '#ff3b3b';
+      matchState.units.forEach(u => {
+        const displayRow = toDisplayRowRef(u.row);
+        const pos = project(u.lane, displayRow);
+        
+        ctx.save();
+        ctx.translate(pos.x, pos.y);
 
-        const spriteView = u.owner === (side === 'PLAYER' ? 'PLAYER' : 'AI') ? 'Back' : 'Front';
-        const img = spriteImages.current[`${u.id}_${spriteView}`];
-        if (img && img.complete) {
-            ctx.save();
-            let s = 140;
-            let yOff = 40;
-            if (u.name === 'Originium Slug') {
-                s = 800;
-                yOff = 225;
-            } else if (u.name === 'Sarkaz Mercenary') {
-                s = 700;
-                yOff = 197;
-            }
-            ctx.shadowBlur = 15; ctx.shadowColor = mainColor + '44';
-            ctx.drawImage(img, basePos.x - s/2, basePos.y - s + yOff, s, s);
-            ctx.restore();
-        }
+        // Unit Sprite Placeholder
+        const isMe = (side === 'PLAYER' && u.owner === 'PLAYER') || (side === 'OPPONENT' && u.owner === 'AI');
+        ctx.fillStyle = isMe ? '#19baff' : '#ef4444';
+        ctx.beginPath();
+        ctx.arc(0, 0, 15, 0, Math.PI * 2);
+        ctx.fill();
 
-        // Health Bar
-        const barW = 30;
-        const healthPct = u.hp / u.maxHp;
-        ctx.fillStyle = 'rgba(0,0,0,0.5)';
-        ctx.fillRect(basePos.x - barW/2, basePos.y + 10, barW, 2);
-        ctx.fillStyle = mainColor;
-        ctx.fillRect(basePos.x - barW/2, basePos.y + 10, barW * healthPct, 2);
+        // HP Bar
+        const hpPercent = u.hp / u.maxHp;
+        ctx.fillStyle = '#333';
+        ctx.fillRect(-20, -25, 40, 4);
+        ctx.fillStyle = isMe ? '#19baff' : '#ef4444';
+        ctx.fillRect(-20, -25, 40 * hpPercent, 4);
+
+        ctx.restore();
       });
 
       // Floating Labels
-      floatingLabels.current = floatingLabels.current.filter(l => {
+      floatingLabels.current = floatingLabels.current.filter(l => l.life > 0);
+      floatingLabels.current.forEach(l => {
+        l.y -= 1;
         l.life -= 0.02;
-        if (l.life <= 0) return false;
-        ctx.save();
         ctx.globalAlpha = l.life;
-        ctx.fillStyle = l.type === 'DAMAGE' ? '#ff3b3b' : '#22c55e';
-        ctx.font = '900 12px monospace';
+        ctx.fillStyle = l.type === 'HEAL' ? '#22c55e' : (l.type === 'DAMAGE' ? '#ef4444' : '#ffffff');
+        ctx.font = 'bold 12px monospace';
         ctx.textAlign = 'center';
-        ctx.fillText(l.value, l.x, l.y - (1 - l.life) * 40);
-        ctx.restore();
-        return true;
+        ctx.fillText(l.value, l.x, l.y);
+        ctx.globalAlpha = 1;
       });
 
-      animFrame = requestAnimationFrame(render);
+      animId = requestAnimationFrame(render);
     };
     render();
-    return () => cancelAnimationFrame(animFrame);
-  }, [matchState, draggingOp, selectedLane, selectedRow, side]);
+    return () => cancelAnimationFrame(animId);
+  }, [matchState, selectedLane, selectedRow]);
 
-  if (!matchState) {
+  if (isQueuing) {
     return (
-      <div className="h-full bg-black flex flex-col items-center justify-center p-8 gap-6 terminal-bg">
-        <div className="w-24 h-24 rounded-full border-2 border-rhodes-blue flex items-center justify-center relative overflow-hidden">
-           <Swords className={`w-12 h-12 text-rhodes-blue ${isQueuing ? 'animate-pulse' : ''}`} />
-           {isQueuing && <div className="absolute inset-0 bg-rhodes-blue/10 animate-scan" />}
+      <div className="flex flex-col items-center justify-center h-full bg-black/90 backdrop-blur-xl">
+        <div className="relative w-24 h-24 mb-8">
+           <div className="absolute inset-0 border-4 border-rhodes-blue/20 rounded-full" />
+           <div className="absolute inset-0 border-4 border-t-rhodes-blue rounded-full animate-spin" />
         </div>
-        <AnimatePresence mode="wait">
-          {!isQueuing ? (
-            <div className="flex flex-col items-center gap-4 w-full">
-              <h2 className="terminal-text text-2xl font-black text-white italic tracking-tighter">CONFLICT TERMINAL</h2>
-              <button onClick={startQueuing} className="rhodes-button glow-blue w-full py-4 bg-rhodes-blue text-black font-black terminal-text text-xs uppercase tracking-[0.2em] flex items-center justify-center gap-2 group">
-                <Search className="w-4 h-4" /> INITIATE MATCHMAKING
-              </button>
-              <button onClick={onBack} className="text-white/40 text-[9px] terminal-text uppercase hover:text-white flex items-center gap-1">
-                <ChevronLeft className="w-3 h-3" /> RETURN TO DASHBOARD
-              </button>
-            </div>
-          ) : (
-            <div className="flex flex-col items-center gap-8 w-full text-center">
-              <Loader2 className="w-8 h-8 text-rhodes-blue animate-spin" />
-              <p className="terminal-text text-xs text-rhodes-blue animate-pulse">SEARCHING FOR OPPONENT...</p>
-              <button onClick={cancelQueuing} className="w-full py-3 border border-white/10 text-white/40 font-bold terminal-text text-[10px] uppercase">ABORT SEQUENCE</button>
-            </div>
-          )}
-        </AnimatePresence>
+        <h2 className="terminal-text text-xl font-black text-rhodes-blue tracking-[0.3em] uppercase italic">Establishing Neural Link</h2>
+        <p className="terminal-text text-[8px] text-white/30 mt-4 tracking-widest uppercase">Searching for compatible tactical signal...</p>
+        <button onClick={onBack} className="mt-12 text-[10px] text-white/40 hover:text-white terminal-text uppercase border-b border-white/10 pb-1">Abort Search</button>
       </div>
     );
   }
@@ -582,7 +367,6 @@ export default function ConflictScreen({ userProfile, onUpdateProfile, onBack, o
         setSelectedRow(null);
       }}
     >
-      {/* Header (Simulation Style) */}
       <div className="p-2 px-4 border-b border-white/10 flex justify-between items-center bg-black/95 backdrop-blur-md z-30 shadow-lg">
         <button onClick={onBack} className="flex items-center gap-2 text-white/40 hover:text-white transition-colors">
           <ChevronLeft className="w-4 h-4" />
@@ -617,18 +401,32 @@ export default function ConflictScreen({ userProfile, onUpdateProfile, onBack, o
       </div>
 
       <div className="flex-1 relative bg-black/40 overflow-hidden">
-        <canvas ref={canvasRef} width={CANVAS_W} height={CANVAS_H} className="w-full h-full cursor-crosshair" onClick={() => {}} />
+        <canvas ref={canvasRef} width={CANVAS_W} height={CANVAS_H} className="w-full h-full cursor-crosshair" />
 
-        {/* Action Phase Overlay */}
         <AnimatePresence>
-          {matchState.phase === 'ACTION' && (
+          {matchState.phase === 'ACTION' && !matchResult && (
             <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="absolute inset-0 bg-red-600/5 backdrop-blur-sm pointer-events-none flex flex-col items-center justify-center z-50">
                 <div className="terminal-text text-red-500 text-xl font-black tracking-[0.4em] uppercase italic">Processing Tactics</div>
             </motion.div>
           )}
         </AnimatePresence>
 
-        {/* Execute Button */}
+        <AnimatePresence>
+          {matchResult && (
+            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="absolute inset-0 z-[300] bg-black/90 flex flex-col items-center justify-center backdrop-blur-xl">
+               <motion.div initial={{ scale: 0.8, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} transition={{ delay: 0.5 }} className="flex flex-col items-center">
+                  <div className={`text-6xl font-black italic tracking-tighter mb-4 ${matchResult === 'VICTORY' ? 'text-rhodes-blue' : 'text-red-600'}`}>
+                    {matchResult}
+                  </div>
+                  <div className="terminal-text text-[10px] text-white/40 uppercase tracking-[0.5em] mb-12">Conflict Resolution Finalized</div>
+                  <button onClick={onBack} className="rhodes-button glow-blue px-12 py-4 bg-rhodes-blue text-black font-black terminal-text text-xs uppercase tracking-widest">
+                    Return to Terminal
+                  </button>
+               </motion.div>
+            </motion.div>
+          )}
+        </AnimatePresence>
+
         <AnimatePresence>
           {matchState.phase === 'COMMAND' && (
             <motion.div initial={{ scale: 0.9, opacity: 0, y: 20 }} animate={{ scale: 1, opacity: 1, y: 0 }} className="absolute bottom-6 right-6 z-40">
@@ -645,7 +443,6 @@ export default function ConflictScreen({ userProfile, onUpdateProfile, onBack, o
           )}
         </AnimatePresence>
 
-        {/* Mulligan Phase */}
         <AnimatePresence>
           {mulliganPhase && (
             <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="absolute inset-0 bg-black/98 z-[200] flex flex-col items-center justify-center p-4 backdrop-blur-md">
@@ -677,7 +474,6 @@ export default function ConflictScreen({ userProfile, onUpdateProfile, onBack, o
         </AnimatePresence>
       </div>
 
-      {/* Player Hand (Simulation Style) */}
       <div className="p-2 bg-[#050505] border-t border-white/10 shrink-0 z-20 shadow-2xl">
         <div className="flex justify-between items-center mb-2 px-2">
             <div className="flex items-center gap-4">
@@ -711,7 +507,6 @@ export default function ConflictScreen({ userProfile, onUpdateProfile, onBack, o
         </div>
       </div>
 
-      {/* Dragging Ghost */}
       {draggingOp && (
         <div className="fixed pointer-events-none z-[1000] w-16 h-24 border border-rhodes-blue bg-rhodes-blue/20 rounded overflow-hidden"
              style={{ left: dragPos.x - 32, top: dragPos.y - 48, transform: 'scale(1.1)' }}>

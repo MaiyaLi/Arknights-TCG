@@ -1,9 +1,0 @@
-services:
-  - type: web
-    name: arknights-tcg-backend
-    env: node
-    buildCommand: npm install
-    startCommand: npx tsx server.ts
-    envVars:
-      - key: NODE_ENV
-        value: production
