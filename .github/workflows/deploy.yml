@@ -19,10 +19,14 @@ jobs:
 
       - name: Build Project
         run: npm run build
+        env:
+          VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL || 'https://otofpzsdyfxmqvigklnb.supabase.co' }}
+          VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im90b2ZwenNkeWZ4bXF2aWdrbG5iIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzc5NzA2MTEsImV4cCI6MjA5MzU0NjYxMX0.8Ym6wBMYNLwH_Fj-I6CJBrH70X06eRMzU_p9uWhjoVk' }}
+          VITE_BACKEND_URL: ${{ secrets.VITE_BACKEND_URL || 'https://otofpzsdyfxmqvigklnb.supabase.co/functions/v1/sync' }}
 
       - name: Deploy to Firebase Hosting
-        run: |
-          echo '${{ secrets.FIREBASE_SERVICE_ACCOUNT }}' > service-account.json
-          ls -la service-account.json
-          export GOOGLE_APPLICATION_CREDENTIALS=service-account.json
-          ./node_modules/.bin/firebase deploy --only hosting --non-interactive --project gen-lang-client-0640114821 --debug
+        uses: w9jds/firebase-action@master
+        with:
+          args: deploy --only hosting --project gen-lang-client-0640114821
+        env:
+          GCP_SA_KEY: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
