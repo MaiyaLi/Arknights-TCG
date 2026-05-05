@@ -8,22 +8,14 @@ on:
 jobs:
   build_and_deploy:
     runs-on: ubuntu-latest
-    env:
-      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Authenticate to Google Cloud
-        uses: google-github-actions/auth@v2
-        with:
-          credentials_json: '${{ secrets.FIREBASE_SERVICE_ACCOUNT }}'
-
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
-          node-version: 24
-          cache: 'npm'
+          node-version: 20
 
       - name: Install Dependencies
         run: npm install
@@ -31,6 +23,16 @@ jobs:
       - name: Build Project
         run: npm run build
 
-      - name: Deploy to Firebase Hosting
+      - name: Debug Build Output
         run: |
-          ./node_modules/.bin/firebase deploy --only hosting --non-interactive --project gen-lang-client-0640114821
+          pwd
+          ls -la
+          ls -R dist || echo "dist folder not found"
+
+      - name: Deploy to Firebase Hosting
+        uses: FirebaseExtended/action-hosting-deploy@v0
+        with:
+          repoToken: '${{ secrets.GITHUB_TOKEN }}'
+          firebaseServiceAccount: '${{ secrets.FIREBASE_SERVICE_ACCOUNT }}'
+          channelId: live
+          projectId: gen-lang-client-0640114821
