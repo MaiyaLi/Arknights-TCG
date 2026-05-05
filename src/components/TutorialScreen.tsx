@@ -784,7 +784,7 @@ export default function TutorialScreen({ onComplete, onSkip }: TutorialScreenPro
   return (
     <div 
       ref={containerRef}
-      className="h-full bg-black flex flex-col relative overflow-hidden select-none touch-none"
+      className="h-full bg-black flex flex-col relative overflow-hidden select-none"
       onMouseMove={handleGlobalMove}
       onMouseUp={handleGlobalUp}
       onTouchMove={handleGlobalMove}
@@ -801,7 +801,16 @@ export default function TutorialScreen({ onComplete, onSkip }: TutorialScreenPro
           >
             <div className="flex justify-between items-center mb-3 border-b border-white/5 pb-1">
               <span className="terminal-text text-[9px] font-black text-rhodes-blue uppercase tracking-widest">{currentStep.title}</span>
-              <button onClick={onSkip} className="text-[7px] terminal-text text-white/30 hover:text-white uppercase transition-colors">[ SKIP INITIALIZATION ]</button>
+              <button 
+                onClick={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  onSkip();
+                }} 
+                className="text-[7px] terminal-text text-white/30 hover:text-white hover:text-rhodes-blue uppercase transition-colors pointer-events-auto relative z-[60]"
+              >
+                [ SKIP INITIALIZATION ]
+              </button>
             </div>
             <div className="flex gap-4">
               <div className="shrink-0 w-8 h-8 rounded border border-rhodes-blue/30 bg-rhodes-blue/5 flex items-center justify-center">

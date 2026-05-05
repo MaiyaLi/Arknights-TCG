@@ -24,7 +24,7 @@ export default function TermsModal({ isOpen, onAccept }: TermsModalProps) {
 
   return (
     <AnimatePresence>
-      <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/90 backdrop-blur-sm p-4">
+      <div className="absolute inset-0 z-50 flex items-center justify-center bg-black/95 backdrop-blur-sm p-4">
         <motion.div
           initial={{ opacity: 0, y: 20, scale: 0.95 }}
           animate={{ opacity: 1, y: 0, scale: 1 }}
@@ -85,11 +85,14 @@ export default function TermsModal({ isOpen, onAccept }: TermsModalProps) {
             </div>
           </div>
 
-          <div className="p-6 border-t border-rhodes-border bg-black/40 flex justify-end gap-4">
+          <div className="p-6 border-t border-rhodes-border bg-black/40 flex flex-col sm:flex-row items-center justify-between gap-4">
+            <p className="text-[9px] terminal-text text-white/20 uppercase">
+              {!hasScrolledToBottom ? "Scroll to bottom to authorize" : "Protocol ready for authorization"}
+            </p>
             <button
               disabled={!hasScrolledToBottom}
               onClick={onAccept}
-              className={`rhodes-button ${hasScrolledToBottom ? 'glow-blue text-rhodes-blue border-rhodes-blue' : 'opacity-30'}`}
+              className={`rhodes-button w-full sm:w-auto pointer-events-auto relative z-[60] ${hasScrolledToBottom ? 'glow-blue text-rhodes-blue border-rhodes-blue' : 'opacity-10 cursor-not-allowed'}`}
             >
               [ I ACCEPT ]
             </button>
