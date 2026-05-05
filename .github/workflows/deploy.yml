@@ -10,9 +10,12 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout Code
-        run: |
-          git clone https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git .
-          git checkout ${{ github.sha }}
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
 
       - name: Install Dependencies
         run: npm install
@@ -20,13 +23,13 @@ jobs:
       - name: Build Project
         run: npm run build
         env:
-          VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL || 'https://otofpzsdyfxmqvigklnb.supabase.co' }}
-          VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im90b2ZwenNkeWZ4bXF2aWdrbG5iIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzc5NzA2MTEsImV4cCI6MjA5MzU0NjYxMX0.8Ym6wBMYNLwH_Fj-I6CJBrH70X06eRMzU_p9uWhjoVk' }}
-          VITE_BACKEND_URL: ${{ secrets.VITE_BACKEND_URL || 'https://otofpzsdyfxmqvigklnb.supabase.co/functions/v1/sync' }}
+          VITE_SUPABASE_URL: 'https://otofpzsdyfxmqvigklnb.supabase.co'
+          VITE_SUPABASE_ANON_KEY: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im90b2ZwenNkeWZ4bXF2aWdrbG5iIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzc5NzA2MTEsImV4cCI6MjA5MzU0NjYxMX0.8Ym6wBMYNLwH_Fj-I6CJBrH70X06eRMzU_p9uWhjoVk'
 
       - name: Deploy to Firebase Hosting
-        uses: w9jds/firebase-action@master
+        uses: FirebaseExtended/action-hosting-deploy@v0
         with:
-          args: deploy --only hosting --project gen-lang-client-0640114821
-        env:
-          GCP_SA_KEY: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+          repoToken: '${{ secrets.GITHUB_TOKEN }}'
+          firebaseServiceAccount: '${{ secrets.FIREBASE_SERVICE_ACCOUNT }}'
+          channelId: live
+          projectId: gen-lang-client-0640114821
