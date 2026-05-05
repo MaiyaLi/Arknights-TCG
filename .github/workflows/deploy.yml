@@ -8,14 +8,22 @@ on:
 jobs:
   build_and_deploy:
     runs-on: ubuntu-latest
+    env:
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: '${{ secrets.FIREBASE_SERVICE_ACCOUNT }}'
+
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
-          node-version: 20 # Reverting to 20 to avoid "forced" issues, let's ignore warnings for now
+          node-version: 24
+          cache: 'npm'
 
       - name: Install Dependencies
         run: npm install
@@ -24,8 +32,5 @@ jobs:
         run: npm run build
 
       - name: Deploy to Firebase Hosting
-        uses: FirebaseExtended/action-hosting-deploy@v0
-        with:
-          repoToken: '${{ secrets.GITHUB_TOKEN }}'
-          firebaseServiceAccount: '${{ secrets.FIREBASE_SERVICE_ACCOUNT }}'
-          channelId: live
+        run: |
+          ./node_modules/.bin/firebase deploy --only hosting --non-interactive --project gen-lang-client-0640114821
