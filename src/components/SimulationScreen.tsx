@@ -239,15 +239,20 @@ export default function SimulationScreen({ userProfile, onUpdateProfile, onBack,
         ctx.stroke();
     }
 
-    // Draw Tactical Environment (Floating Platforms)
+        // Draw Tactical Environment (Floating Platforms)
     for (let r = 0; r < 7; r++) {
       for (let l = 0; l < 3; l++) {
         const isSelected = selectedLane === l && selectedRow === r;
         const isOccupied = kernel.units.some(u => u.lane === l && u.row === r);
-        const classValid = draggingOp ? kernel.canDeploy(draggingOp.op.class, r, 'PLAYER') : false;
         
-        const isPlaceable = draggingOp && classValid && !isOccupied;
-        const isInvalid = draggingOp && (!classValid || isOccupied);
+        // Item Logic: Can be dropped anywhere in rows 1-5
+        const isItem = draggingOp?.op.class === 'Item';
+        const classValid = isItem 
+          ? (r >= 1 && r <= 5) 
+          : (draggingOp ? kernel.canDeploy(draggingOp.op.class, r, 'PLAYER') : false);
+        
+        const isPlaceable = draggingOp && classValid && (isItem || !isOccupied);
+        const isInvalid = draggingOp && (!classValid || (!isItem && isOccupied));
         
         // Platform "Pad" sizes - strictly independent
         const padSize = isSelected ? 0.43 : 0.4; 
@@ -1578,6 +1583,54 @@ export default function SimulationScreen({ userProfile, onUpdateProfile, onBack,
           ))}
         </div>
       </div>
+
+      {/* Victory/Defeat Overlay */}
+      <AnimatePresence>
+        {winner && (
+          <motion.div 
+            initial={{ opacity: 0 }} 
+            animate={{ opacity: 1 }} 
+            className="absolute inset-0 z-[1000] bg-black/90 flex flex-col items-center justify-center backdrop-blur-xl"
+          >
+             <motion.div 
+               initial={{ scale: 0.8, opacity: 0 }} 
+               animate={{ scale: 1, opacity: 1 }} 
+               transition={{ delay: 0.5, type: 'spring' }} 
+               className="flex flex-col items-center"
+             >
+                <div className="relative mb-8">
+                  <div className={`text-7xl font-black italic tracking-tighter ${winner === 'PLAYER' ? 'text-rhodes-blue' : 'text-red-600'} drop-shadow-[0_0_30px_rgba(0,186,255,0.5)]`}>
+                    {winner === 'PLAYER' ? 'VICTORY' : 'DEFEAT'}
+                  </div>
+                  <div className="absolute -bottom-2 right-0 bg-white text-black text-[10px] font-black px-2 py-0.5 terminal-text uppercase">
+                    Simulation {winner === 'PLAYER' ? 'Success' : 'Terminated'}
+                  </div>
+                </div>
+
+                <div className="terminal-text text-[10px] text-white/40 uppercase tracking-[0.5em] mb-12 text-center max-w-[300px]">
+                  {winner === 'PLAYER' 
+                    ? "Neural link synchronization complete. Tactical objectives achieved." 
+                    : "Neural link integrity compromised. Aborting simulation sequence."}
+                </div>
+
+                <div className="flex flex-col gap-4 w-full max-w-[200px]">
+                  <button 
+                    onClick={onBack} 
+                    className="rhodes-button glow-blue w-full py-4 bg-rhodes-blue text-black font-black terminal-text text-xs uppercase tracking-widest"
+                  >
+                    Return to Terminal
+                  </button>
+                  <button 
+                    onClick={() => window.location.reload()} 
+                    className="text-[10px] text-white/20 hover:text-white terminal-text uppercase transition-colors"
+                  >
+                    [ REINITIALIZE SIMULATION ]
+                  </button>
+                </div>
+             </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       {/* Dragging Ghost */}
       {draggingOp && (

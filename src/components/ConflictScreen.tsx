@@ -221,6 +221,11 @@ export default function ConflictScreen({ userProfile, onUpdateProfile, onBack, o
     const currentDP = side === 'PLAYER' ? matchState.playerDP : matchState.opponentDP;
     if (currentDP < cost) return;
 
+    // Item check: Items can be dropped in rows 1-5
+    const isItem = op.class === 'Item';
+    if (!isItem && (row < 4 || row > 5)) return; // Normal units restricted to frontline/backline
+    if (isItem && (row < 1 || row > 5)) return; // Items restricted to field
+
     channel?.send({ type: 'broadcast', event: 'deploy_unit', payload: { opId: op.id, lane, row: toKernelRow(row), side } });
     
     setPlayerHand(prev => prev.filter(p => p.id !== op.id));
@@ -282,7 +287,10 @@ export default function ConflictScreen({ userProfile, onUpdateProfile, onBack, o
 
       // Selection
       if (selectedLane !== null && selectedRow !== null) {
-        ctx.fillStyle = 'rgba(25, 186, 255, 0.2)';
+        const isItem = draggingOp?.op.class === 'Item';
+        const isValid = isItem ? (selectedRow >= 1 && selectedRow <= 5) : true; // More detailed checks happen in handleDeploy
+        
+        ctx.fillStyle = isValid ? 'rgba(25, 186, 255, 0.2)' : 'rgba(239, 68, 68, 0.1)';
         ctx.fillRect(selectedLane * (CANVAS_W/3), selectedRow * (CANVAS_H/7), CANVAS_W/3, CANVAS_H/7);
       }
 
@@ -414,12 +422,31 @@ export default function ConflictScreen({ userProfile, onUpdateProfile, onBack, o
         <AnimatePresence>
           {matchResult && (
             <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="absolute inset-0 z-[300] bg-black/90 flex flex-col items-center justify-center backdrop-blur-xl">
-               <motion.div initial={{ scale: 0.8, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} transition={{ delay: 0.5 }} className="flex flex-col items-center">
-                  <div className={`text-6xl font-black italic tracking-tighter mb-4 ${matchResult === 'VICTORY' ? 'text-rhodes-blue' : 'text-red-600'}`}>
-                    {matchResult}
+               <motion.div 
+                 initial={{ scale: 0.8, opacity: 0 }} 
+                 animate={{ scale: 1, opacity: 1 }} 
+                 transition={{ delay: 0.5, type: 'spring' }} 
+                 className="flex flex-col items-center"
+               >
+                  <div className="relative mb-8 text-center">
+                    <div className={`text-7xl font-black italic tracking-tighter ${matchResult === 'VICTORY' ? 'text-rhodes-blue' : 'text-red-600'} drop-shadow-[0_0_30px_rgba(0,186,255,0.4)]`}>
+                      {matchResult}
+                    </div>
+                    <div className="absolute -bottom-2 right-0 left-0 text-center text-white text-[10px] font-black px-2 py-0.5 terminal-text uppercase">
+                      Conflict {matchResult === 'VICTORY' ? 'Resolution: SUCCESS' : 'Resolution: FAILED'}
+                    </div>
                   </div>
-                  <div className="terminal-text text-[10px] text-white/40 uppercase tracking-[0.5em] mb-12">Conflict Resolution Finalized</div>
-                  <button onClick={onBack} className="rhodes-button glow-blue px-12 py-4 bg-rhodes-blue text-black font-black terminal-text text-xs uppercase tracking-widest">
+
+                  <div className="terminal-text text-[10px] text-white/40 uppercase tracking-[0.5em] mb-12 text-center max-w-[300px]">
+                    {matchResult === 'VICTORY' 
+                      ? "Neural link synchronization complete. Territorial control established." 
+                      : "Neural link integrity compromised. Strategic withdrawal initiated."}
+                  </div>
+
+                  <button 
+                    onClick={onBack} 
+                    className="rhodes-button glow-blue px-12 py-4 bg-rhodes-blue text-black font-black terminal-text text-xs uppercase tracking-widest"
+                  >
                     Return to Terminal
                   </button>
                </motion.div>

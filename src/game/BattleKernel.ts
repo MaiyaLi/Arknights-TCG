@@ -724,7 +724,46 @@ export class BattleKernel {
     if (this.isPaused || this.phase === 'GAMEOVER') return;
   }
 
+  useItem(operator: Operator, lane: number, row: number, owner: 'PLAYER' | 'AI'): boolean {
+    const cost = operator.dp_cost;
+    if (owner === 'PLAYER') {
+      if (this.playerDP < cost) return false;
+      this.playerDP -= cost;
+    } else {
+      if (this.aiDP < cost) return false;
+      this.aiDP -= cost;
+    }
+
+    // Apply immediate effect based on item ID
+    if (operator.id === 'item_med_01') {
+      // Heal all allies in a 3x3 area around target
+      this.units.filter(u => u.owner === owner && Math.abs(u.lane - lane) <= 1 && Math.abs(u.row - row) <= 1)
+        .forEach(u => {
+          u.hp = Math.min(u.maxHp, u.hp + 15);
+          this.onCombatEvent(u.lane, u.row, 15, 'HEAL');
+        });
+    } else if (operator.id === 'item_mine_01') {
+      // Damage all enemies in a 3x3 area
+      this.units.filter(u => u.owner !== owner && Math.abs(u.lane - lane) <= 1 && Math.abs(u.row - row) <= 1)
+        .forEach(u => {
+          u.hp -= 30;
+          this.onCombatEvent(u.lane, u.row, 30, 'DAMAGE');
+        });
+    } else if (operator.id === 'item_drone_01') {
+      // Global DP boost or something? Let's make it a tactical scan
+      // For now, just damage everyone in lane
+      this.units.filter(u => u.owner !== owner && u.lane === lane)
+        .forEach(u => {
+          u.hp -= 10;
+          this.onCombatEvent(u.lane, u.row, 10, 'DAMAGE');
+        });
+    }
+
+    return true;
+  }
+
   deployUnit(operator: Operator, owner: 'PLAYER' | 'AI', lane: number, row: number) {
+    if (operator.class === 'Item') return this.useItem(operator, lane, row, owner);
     if (!this.canDeploy(operator.class, row, owner)) return false;
     
     const cost = operator.dp_cost;
