@@ -244,28 +244,7 @@ export class BattleKernel {
       if (shouldRetreat) unitsToRetreat.push(u.instanceId);
     });
 
-    // 6. Item End-of-Turn Effects
-    this.units.forEach(u => {
-      if (u.id === 'item_med_01' && u.hp > 0) {
-        // Heal allies in adjacent slots
-        const allies = this.units.filter(a => a.instanceId !== u.instanceId && a.owner === u.owner && Math.abs(a.lane - u.lane) <= 1 && Math.abs(a.row - u.row) <= 1 && a.hp > 0);
-        allies.forEach(ally => {
-          ally.hp = Math.min(ally.maxHp, ally.hp + 5);
-          this.onCombatEvent(ally.lane, ally.row, 5, 'HEAL');
-        });
-      } else if (u.id === 'item_mine_01' && u.hp > 0) {
-        // Explode if enemy is adjacent or in same slot
-        const enemiesNearby = this.units.filter(e => e.owner !== u.owner && e.hp > 0 && Math.abs(e.lane - u.lane) <= 1 && Math.abs(e.row - u.row) <= 1);
-        if (enemiesNearby.length > 0) {
-          enemiesNearby.forEach(e => {
-             e.hp -= 25;
-             this.onCombatEvent(e.lane, e.row, 25, 'DAMAGE');
-          });
-          u.hp = 0; // Consume mine
-          this.onUnitRemoved(u, 'DEFEATED'); // Immediately remove so it doesn't linger
-        }
-      }
-    });
+    // 6. Specialist Maintenance (Removed persistent item effects as items are now immediate)
     this.units = this.units.filter(u => u.hp > 0);
 
     unitsToRetreat.forEach(instanceId => {
@@ -804,7 +783,7 @@ export class BattleKernel {
       lastMoveTime: Date.now(),
       lastCombatTime: 0,
       isMoving: true,
-      isStationary: operator.class === 'Vanguard' || operator.class === 'Specialist' || operator.class === 'Item' || operator.class === 'Robot',
+      isStationary: operator.class === 'Vanguard' || operator.class === 'Specialist' || operator.class === 'Robot',
       rarity: operator.rarity,
       class: operator.class,
       name: operator.name,
