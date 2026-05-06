@@ -99,50 +99,87 @@ export default function App() {
                delete (profile.currentCurrency as any).shards;
             }
 
+        try {
+          // 1. Check Supabase
+          const { data: sbProfile, error: sbError } = await supabase
+            .from('profiles')
+            .select('*')
+            .eq('id', user.uid)
+            .single();
+
+          if (sbProfile && !sbError) {
+            const profile: UserProfile = {
+              uid: sbProfile.id,
+              displayName: sbProfile.display_name,
+              email: sbProfile.email || '',
+              level: sbProfile.level,
+              exp: sbProfile.exp,
+              currentCurrency: { orundum: sbProfile.orundum, certificates: sbProfile.certificates },
+              collection: sbProfile.collection,
+              squads: sbProfile.squads,
+              hasCompletedTutorial: sbProfile.has_completed_tutorial,
+              hasAcceptedTerms: sbProfile.has_accepted_terms,
+              loginType: sbProfile.login_type as any,
+              lastClaimedDate: sbProfile.last_claimed_date || '',
+              activeSquadIndex: sbProfile.active_squad_index || 0
+            };
             setUserProfile(profile);
             localStorage.setItem('arknights_profile', JSON.stringify(profile));
             checkDailyLogin(profile);
+            setAppState(profile.hasCompletedTutorial ? 'DASHBOARD' : 'TUTORIAL');
+            setIsLoading(false);
+            return;
+          }
 
-            if (!profile.hasAcceptedTerms) {
-              setAppState('TERMS');
-            } else if (!profile.hasCompletedTutorial) {
-              setAppState('TUTORIAL');
-            } else {
-              setAppState('DASHBOARD');
+          // 2. Fallback to Firestore
+          const userDoc = await getDoc(doc(db, 'users', user.uid));
+          if (userDoc.exists()) {
+            const profile = userDoc.data() as UserProfile;
+            
+            // Check for guest-to-google migration
+            if (localProfile && !user.isAnonymous && localProfile.loginType === 'guest' && profile.collection.length <= 1) {
+              const mergedProfile: UserProfile = {
+                ...localProfile,
+                uid: user.uid,
+                email: user.email || '',
+                loginType: 'google',
+                displayName: user.displayName || localProfile.displayName
+              };
+              handleUpdateProfile(mergedProfile);
+              return;
             }
+
+            setUserProfile(profile);
+            localStorage.setItem('arknights_profile', JSON.stringify(profile));
+            checkDailyLogin(profile);
+            setAppState(profile.hasCompletedTutorial ? 'DASHBOARD' : 'TUTORIAL');
           } else {
-            // New user or local migration
+            // 3. New user or local migration
             let profileToMigrate = localProfile;
             if (!profileToMigrate || profileToMigrate.loginType !== 'guest') {
               profileToMigrate = {
                 uid: user.uid,
-                email: user.email,
-                displayName: user.displayName,
+                email: user.email || '',
+                displayName: user.displayName || 'Doctor',
                 hasAcceptedTerms: hasAccepted,
                 hasCompletedTutorial: false,
-                loginType: 'google',
+                loginType: user.isAnonymous ? 'guest' : 'google',
                 currentCurrency: INITIAL_CURRENCY,
-                inventory: INITIAL_INVENTORY,
-                collection: [],
-                unlockedSkills: [],
-                squads: [[], [], []],
+                collection: ['ami_001'],
+                squads: [['ami_001'], [], []],
                 activeSquadIndex: 0,
-                lastLogin: new Date().toISOString(),
                 level: 1,
                 exp: 0,
-                loginStreak: 1,
                 lastClaimedDate: null,
-                pity5: 0,
-                pity6: 0,
-              };
+              } as any;
             } else {
               profileToMigrate.uid = user.uid;
-              profileToMigrate.email = user.email;
+              profileToMigrate.email = user.email || '';
               profileToMigrate.loginType = 'google';
             }
             
-            setUserProfile(profileToMigrate);
-            setAppState('SETUP_PROFILE');
+            handleUpdateProfile(profileToMigrate!);
+            setAppState(profileToMigrate!.hasCompletedTutorial ? 'DASHBOARD' : 'TUTORIAL');
           }
         } catch (error) {
           console.error("Error fetching user profile:", error);
@@ -324,12 +361,38 @@ export default function App() {
     }
   };
 
-  const handleUpdateProfile = (profile: UserProfile) => {
+  const handleUpdateProfile = async (profile: UserProfile) => {
     setUserProfile(profile);
     localStorage.setItem('arknights_profile', JSON.stringify(profile));
     
+    // Sync to Supabase
+    try {
+      const { error } = await supabase
+        .from('profiles')
+        .upsert({
+          id: profile.uid,
+          display_name: profile.displayName,
+          email: profile.email,
+          level: profile.level,
+          exp: profile.exp,
+          orundum: profile.currentCurrency.orundum,
+          certificates: profile.currentCurrency.certificates,
+          collection: profile.collection,
+          squads: profile.squads,
+          has_completed_tutorial: profile.hasCompletedTutorial,
+          has_accepted_terms: profile.hasAcceptedTerms,
+          login_type: profile.loginType,
+          updated_at: new Date().toISOString()
+        });
+      
+      if (error) console.error("Supabase Sync Error:", error);
+    } catch (e) {
+      console.error("Supabase Operation Failed:", e);
+    }
+
+    // Keep Firestore as secondary backup for transition
     setDoc(doc(db, 'users', profile.uid), profile, { merge: true }).catch(e => {
-      console.error("Failed to sync profile to cloud", e);
+      console.error("Firestore Sync Error:", e);
     });
   };
 
