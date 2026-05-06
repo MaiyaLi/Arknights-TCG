@@ -8,8 +8,6 @@ on:
 jobs:
   build_and_deploy:
     runs-on: ubuntu-latest
-    env:
-      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
@@ -17,7 +15,8 @@ jobs:
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
-          node-version: 24
+          node-version: 20
+          cache: 'npm'
 
       - name: Install Dependencies
         run: npm install
@@ -29,9 +28,8 @@ jobs:
           VITE_SUPABASE_ANON_KEY: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im90b2ZwenNkeWZ4bXF2aWdrbG5iIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzc5NzA2MTEsImV4cCI6MjA5MzU0NjYxMX0.8Ym6wBMYNLwH_Fj-I6CJBrH70X06eRMzU_p9uWhjoVk'
 
       - name: Deploy to Firebase Hosting
-        uses: FirebaseExtended/action-hosting-deploy@v0
+        uses: w9jds/firebase-action@v13.1.0
         with:
-          repoToken: '${{ secrets.GITHUB_TOKEN }}'
-          firebaseServiceAccount: '${{ secrets.FIREBASE_SERVICE_ACCOUNT }}'
-          channelId: live
-          projectId: gen-lang-client-0640114821
+          args: deploy --only hosting --project gen-lang-client-0640114821
+        env:
+          GCP_SA_KEY: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}

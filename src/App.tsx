@@ -177,28 +177,31 @@ export default function App() {
   };
 
   const handleCompleteTutorial = () => {
-    if (!userProfile) return;
+    // 1. Immediate UI Transition
+    setAppState('DASHBOARD');
     
-    // Grant 3-star operators as a starter pack
+    // 2. Local State update
     const starterPack = ['fang_001', 'beagle_001', 'melantha_001', 'kroos_001', 'hibiscus_001'];
-    // Merge with current collection ensuring no duplicates
-    const newCollection = [...new Set([...userProfile.collection, ...starterPack])];
-    
-    // Automatically populate the first empty squad if it's empty
-    const newSquads = [...userProfile.squads] as [string[], string[], string[]];
-    if (newSquads[0].length === 0) {
-      newSquads[0] = [...starterPack];
-    }
+    const newCollection = [...new Set([...(userProfile?.collection || []), ...starterPack])];
+    const newSquads = [...(userProfile?.squads || [[], [], []])] as [string[], string[], string[]];
+    if (newSquads[0].length === 0) newSquads[0] = [...starterPack];
 
     const newProfile = { 
-      ...userProfile, 
+      ...(userProfile || {}), 
       hasCompletedTutorial: true,
       collection: newCollection,
       squads: newSquads
-    };
+    } as UserProfile;
     
-    handleUpdateProfile(newProfile);
-    setAppState('DASHBOARD');
+    setUserProfile(newProfile);
+    localStorage.setItem('arknights_profile', JSON.stringify(newProfile));
+    localStorage.setItem('arknights_tutorial_completed', 'true');
+    
+    // 3. Background Sync (don't let it block)
+    if (newProfile.uid) {
+      setDoc(doc(db, 'users', newProfile.uid), newProfile, { merge: true }).catch(e => console.error(e));
+    }
+    
     setShowRewardNotification(starterPack);
   };
 

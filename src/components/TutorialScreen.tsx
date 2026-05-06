@@ -790,6 +790,20 @@ export default function TutorialScreen({ onComplete, onSkip }: TutorialScreenPro
       onTouchMove={handleGlobalMove}
       onTouchEnd={handleGlobalUp}
     >
+      {/* Independent Skip Button at the very top */}
+      <div className="absolute top-6 right-6 z-[100] pointer-events-auto">
+        <button 
+          onClick={(e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            onSkip();
+          }} 
+          className="text-[8px] terminal-text text-white/30 hover:text-white hover:text-rhodes-blue uppercase transition-colors px-3 py-1 border border-white/5 bg-black/40 backdrop-blur-md rounded-sm"
+        >
+          [ SKIP INITIALIZATION ]
+        </button>
+      </div>
+
       <div className="absolute top-4 left-4 right-4 z-50 flex flex-col items-center pointer-events-none">
         <AnimatePresence mode="wait">
           <motion.div
@@ -801,16 +815,6 @@ export default function TutorialScreen({ onComplete, onSkip }: TutorialScreenPro
           >
             <div className="flex justify-between items-center mb-3 border-b border-white/5 pb-1">
               <span className="terminal-text text-[9px] font-black text-rhodes-blue uppercase tracking-widest">{currentStep.title}</span>
-              <button 
-                onClick={(e) => {
-                  e.preventDefault();
-                  e.stopPropagation();
-                  onSkip();
-                }} 
-                className="text-[7px] terminal-text text-white/30 hover:text-white hover:text-rhodes-blue uppercase transition-colors pointer-events-auto relative z-[60]"
-              >
-                [ SKIP INITIALIZATION ]
-              </button>
             </div>
             <div className="flex gap-4">
               <div className="shrink-0 w-8 h-8 rounded border border-rhodes-blue/30 bg-rhodes-blue/5 flex items-center justify-center">
