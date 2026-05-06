@@ -72,6 +72,18 @@ export default function App() {
           if (docSnap.exists()) {
             const profile = docSnap.data() as UserProfile;
             
+            // Link Guest data to Google account if migrating
+            if (localProfile?.loginType === 'guest') {
+              profile.collection = [...new Set([...profile.collection, ...localProfile.collection])];
+              profile.currentCurrency.orundum = Math.max(profile.currentCurrency.orundum, localProfile.currentCurrency.orundum);
+              profile.currentCurrency.certificates = Math.max(profile.currentCurrency.certificates, localProfile.currentCurrency.certificates);
+              profile.level = Math.max(profile.level || 1, localProfile.level || 1);
+              profile.exp = Math.max(profile.exp || 0, localProfile.exp || 0);
+              profile.hasCompletedTutorial = profile.hasCompletedTutorial || localProfile.hasCompletedTutorial;
+              profile.hasAcceptedTerms = profile.hasAcceptedTerms || localProfile.hasAcceptedTerms;
+              profile.loginType = 'google';
+            }
+
             // Migration for old profiles in cloud
             if (!profile.squads) {
               const oldSquad = (profile as any).activeSquad || [];
@@ -145,6 +157,13 @@ export default function App() {
 
     return () => unsubscribe();
   }, []);
+
+  useEffect(() => {
+    if ((window as any).triggerGoogleLink) {
+      (window as any).triggerGoogleLink = false;
+      handleGoogleLogin();
+    }
+  }, [appState]);
 
   const checkDailyLogin = (profile: UserProfile) => {
     const today = new Date().toDateString();

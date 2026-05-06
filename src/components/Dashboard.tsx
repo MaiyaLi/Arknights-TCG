@@ -28,7 +28,19 @@ interface DashboardProps {
 
 export default function Dashboard({ userProfile, onLogout, onStartTutorial, onUpdateProfile }: DashboardProps) {
   const [showSelector, setShowSelector] = React.useState(false);
+  const [isEditingName, setIsEditingName] = React.useState(false);
+  const [newName, setNewName] = React.useState(userProfile.displayName || '');
   const isTutorialPending = !userProfile.hasCompletedTutorial;
+
+  const handleUpdateName = () => {
+    if (newName.trim() && newName !== userProfile.displayName) {
+      onUpdateProfile({
+        ...userProfile,
+        displayName: newName.trim()
+      });
+    }
+    setIsEditingName(false);
+  };
 
   // Resolve Assistant
   const activeSquad = userProfile.squads[userProfile.activeSquadIndex];
@@ -62,10 +74,27 @@ export default function Dashboard({ userProfile, onLogout, onStartTutorial, onUp
               LV.{userProfile.level}
             </div>
           </div>
-          <div className="space-y-0.5">
-            <h1 className="text-[10px] font-black terminal-text truncate max-w-[120px] tracking-tighter uppercase text-white/90">
-              {userProfile.displayName || 'Doctor'}
-            </h1>
+          <div className="space-y-0.5 group">
+            <div className="flex items-center gap-2">
+              {isEditingName ? (
+                <input
+                  autoFocus
+                  className="bg-white/5 border border-rhodes-blue/30 text-[10px] terminal-text text-white px-2 py-0.5 outline-none w-32"
+                  value={newName}
+                  onChange={(e) => setNewName(e.target.value.toUpperCase())}
+                  onBlur={() => handleUpdateName()}
+                  onKeyDown={(e) => e.key === 'Enter' && handleUpdateName()}
+                />
+              ) : (
+                <h1 
+                  onClick={() => setIsEditingName(true)}
+                  className="text-[10px] font-black terminal-text truncate max-w-[120px] tracking-tighter uppercase text-white/90 cursor-pointer hover:text-rhodes-blue transition-colors flex items-center gap-1"
+                >
+                  {userProfile.displayName || 'Doctor'}
+                  <RefreshCcw className="w-2 h-2 opacity-0 group-hover:opacity-100 transition-opacity" />
+                </h1>
+              )}
+            </div>
             <div className="w-20 h-1 bg-white/5 rounded-full overflow-hidden border border-white/5">
                <div 
                  className="h-full bg-rhodes-blue transition-all duration-1000 shadow-[0_0_5px_rgba(0,186,255,0.5)]" 
@@ -95,6 +124,22 @@ export default function Dashboard({ userProfile, onLogout, onStartTutorial, onUp
             </div>
             <p className="text-[6px] text-white/20 terminal-text uppercase font-black">Certificates</p>
           </div>
+          
+          {userProfile.loginType === 'guest' && (
+            <button 
+              onClick={(e) => {
+                e.stopPropagation();
+                // Pass a specific flag to App to trigger Google Login
+                (window as any).triggerGoogleLink = true;
+                onLogout(); 
+              }}
+              className="bg-white/5 border border-white/10 px-2 py-1 rounded-sm flex items-center gap-1 hover:bg-white/10 transition-all group"
+            >
+              <RefreshCcw className="w-2.5 h-2.5 text-rhodes-blue group-hover:rotate-180 transition-transform duration-500" />
+              <span className="text-[6px] terminal-text font-black text-white/60 group-hover:text-white">LINK GMAIL</span>
+            </button>
+          )}
+
           <button 
             onClick={onLogout}
             className="p-1.5 hover:bg-white/5 rounded-full transition-colors ml-1 text-white/30 hover:text-white"
