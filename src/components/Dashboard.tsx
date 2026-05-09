@@ -285,11 +285,27 @@ export default function Dashboard({ userProfile, onLogout, onStartTutorial, onUp
 
       {/* Footer Info */}
       <footer className="border-t border-rhodes-blue/20 pt-4 flex justify-between items-center shrink-0">
-        <div className="flex items-center gap-2">
-          <div className="w-2 h-2 rounded-full bg-green-500 animate-pulse shadow-[0_0_5px_rgba(34,197,94,0.5)]" />
-          <span className="text-[8px] text-white/40 terminal-text font-bold">SERVER STATUS: ONLINE</span>
+        <div className="flex flex-col gap-1">
+          <div className="flex items-center gap-2">
+            <div className={`w-2 h-2 rounded-full animate-pulse shadow-[0_0_5px_rgba(34,197,94,0.5)] ${(window as any).LAST_SYNC_ERROR ? 'bg-red-500 shadow-[0_0_5px_#ef4444]' : 'bg-green-500 shadow-[0_0_5px_#22c55e]'}`} />
+            <span className="text-[8px] text-white/40 terminal-text font-bold uppercase">
+              {(window as any).LAST_SYNC_ERROR ? 'SYNC ERROR: CONNECTION INTERRUPTED' : 'CLOUD SYNC: OPERATIONAL'}
+            </span>
+          </div>
+          {(window as any).LAST_SYNC_ERROR && (
+            <button 
+              onClick={() => {
+                // Trigger a dummy update to force sync
+                onUpdateProfile({ ...userProfile });
+                alert("Neural Link: Manual synchronization initiated...");
+              }}
+              className="text-[6px] text-rhodes-blue terminal-text hover:underline text-left font-black"
+            >
+              [ FORCE MANUAL SYNC ]
+            </button>
+          )}
         </div>
-        <span className="text-[8px] text-white/30 terminal-text font-bold">RHODES ISLAND TERMINAL v1.0.5</span>
+        <span className="text-[8px] text-white/30 terminal-text font-bold uppercase">RHODES ISLAND TERMINAL v1.0.7</span>
       </footer>
     </div>
   );

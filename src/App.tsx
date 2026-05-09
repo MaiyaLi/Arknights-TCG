@@ -165,6 +165,14 @@ export default function App() {
               loginType: 'google',
               displayName: user.displayName || localProfile.displayName
             };
+          } else if (localProfile && (localProfile.uid === user.uid || localProfile.email === user.email)) {
+            // FALLBACK: Use local profile if cloud fetch failed but local exists and matches
+            console.log("Cloud sync delayed or failed. Using local backup profile.");
+            activeProfile = {
+              ...localProfile,
+              uid: user.uid, // Ensure UID is correct
+              loginType: 'google'
+            };
           } else if (user.providerData.length > 0) {
             // It's a Google user, but no cloud profile was found AND no local guest profile exists.
             // This is either a TRULY new user, or a sync failure.
@@ -471,8 +479,11 @@ export default function App() {
         console.error("Supabase Sync Error:", error.message);
         // Alert only on non-standard errors
         if (error.code !== 'PGRST116') {
-           console.warn("Handshake Warning: Sync failed.", error.code);
+           // We can't alert here as it might be too noisy, but we store the error
+           (window as any).LAST_SYNC_ERROR = error;
         }
+      } else {
+        (window as any).LAST_SYNC_ERROR = null;
       }
     } catch (e) {
       console.error("Supabase Operation Failed:", e);
