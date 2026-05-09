@@ -135,10 +135,28 @@ export default function App() {
           if (cloudProfile) {
             console.log("Cloud profile found. Using cloud data.");
             activeProfile = cloudProfile;
-            // Optionally merge guest cards if they aren't in cloud
+            
+            // Special Case: If user has a guest profile locally, and it's their FIRST time linking to Google
+            // (Cloud profile might be empty or basic), merge the local guest progress.
             if (localProfile && localProfile.loginType === 'guest') {
+              console.log("Merging local guest data into existing cloud profile...");
+              // Merge collection and affinity
               const uniqueCards = [...new Set([...activeProfile.collection, ...localProfile.collection])];
               activeProfile.collection = uniqueCards;
+              
+              if (localProfile.affinity) {
+                Object.keys(localProfile.affinity).forEach(opId => {
+                  if (!activeProfile.affinity[opId] || localProfile.affinity[opId] > activeProfile.affinity[opId]) {
+                    activeProfile.affinity[opId] = localProfile.affinity[opId];
+                  }
+                });
+              }
+              
+              // Use the higher level/exp
+              if (localProfile.level > activeProfile.level) {
+                activeProfile.level = localProfile.level;
+                activeProfile.exp = localProfile.exp;
+              }
             }
           } else if (localProfile && localProfile.loginType === 'guest') {
             console.log("No cloud profile. Merging guest data to new Google account.");
@@ -443,7 +461,13 @@ export default function App() {
           updated_at: new Date().toISOString()
         });
       
-      if (error) console.error("Supabase Sync Error:", error);
+      if (error) {
+        console.error("Supabase Sync Error:", error);
+        // Alert the user if sync fails significantly
+        if (error.code !== 'PGRST116') { // Ignore "not found" error for initial saves
+           // alert("Neural Link Sync Error: Your progress may not be saved to the cloud. Please check your connection.");
+        }
+      }
     } catch (e) {
       console.error("Supabase Operation Failed:", e);
     }

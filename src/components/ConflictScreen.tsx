@@ -82,20 +82,37 @@ export default function ConflictScreen({ userProfile, onUpdateProfile, onBack, o
       .on('presence', { event: 'sync' }, () => {
         const state = lobbyChannel.presenceState();
         const users = Object.keys(state).sort();
+        
+        console.log("Tactical Signals Detected:", users);
+
         if (users.length >= 2) {
-          const pair = users.slice(0, 2);
-          if (pair.includes(userProfile.uid)) {
-            const mId = `match_${pair.join('_')}`;
+          // Robust Pairing: Find the first pair that includes ME
+          let myPair: string[] | null = null;
+          for (let i = 0; i < users.length - 1; i += 2) {
+            const p = [users[i], users[i+1]];
+            if (p.includes(userProfile.uid)) {
+              myPair = p;
+              break;
+            }
+          }
+
+          if (myPair) {
+            const mId = `match_${myPair.join('_')}`;
             setMatchId(mId);
-            setSide(pair[0] === userProfile.uid ? 'PLAYER' : 'OPPONENT');
-            startMatch(mId, pair[0] === userProfile.uid);
-            lobbyChannel.unsubscribe();
+            setSide(myPair[0] === userProfile.uid ? 'PLAYER' : 'OPPONENT');
+            
+            // Wait slightly to ensure both sides see each other in presence before switching channels
+            setTimeout(() => {
+              startMatch(mId, myPair![0] === userProfile.uid);
+              lobbyChannel.unsubscribe();
+            }, 1000);
           }
         }
       })
       .subscribe(async (status) => {
         if (status === 'SUBSCRIBED') {
-          await lobbyChannel.track({ user_id: userProfile.uid, name: userProfile.displayName });
+          console.log("Broadcasting Tactical Signal...");
+          await lobbyChannel.track({ user_id: userProfile.uid, name: userProfile.displayName, joined_at: Date.now() });
         }
       });
   };

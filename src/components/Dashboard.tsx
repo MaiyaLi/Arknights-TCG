@@ -289,7 +289,7 @@ export default function Dashboard({ userProfile, onLogout, onStartTutorial, onUp
           <div className="w-2 h-2 rounded-full bg-green-500 animate-pulse shadow-[0_0_5px_rgba(34,197,94,0.5)]" />
           <span className="text-[8px] text-white/40 terminal-text font-bold">SERVER STATUS: ONLINE</span>
         </div>
-        <span className="text-[8px] text-white/30 terminal-text font-bold">RHODES ISLAND TERMINAL v1.0.4</span>
+        <span className="text-[8px] text-white/30 terminal-text font-bold">RHODES ISLAND TERMINAL v1.0.5</span>
       </footer>
     </div>
   );
