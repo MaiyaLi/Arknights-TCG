@@ -426,9 +426,22 @@ export default function App() {
       console.error("Supabase Operation Failed:", e);
     }
 
-    // Keep Firestore as secondary backup for transition
-    setDoc(doc(db, 'users', profile.uid), profile, { merge: true }).catch(e => {
-      console.error("Firestore Sync Error:", e);
+    // Keep Firestore as secondary backup for transition, but sanitize to avoid nested array errors
+    const firestorePayload = {
+      uid: profile.uid,
+      email: profile.email,
+      displayName: profile.displayName,
+      level: profile.level,
+      exp: profile.exp,
+      currentCurrency: profile.currentCurrency,
+      loginType: profile.loginType,
+      hasCompletedTutorial: profile.hasCompletedTutorial,
+      hasAcceptedTerms: profile.hasAcceptedTerms,
+      updated_at: new Date().toISOString()
+    };
+
+    setDoc(doc(db, 'users', profile.uid), firestorePayload, { merge: true }).catch(e => {
+      console.error("Firestore Sync Error (Basic):", e);
     });
   };
 
