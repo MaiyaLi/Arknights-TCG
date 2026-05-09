@@ -129,6 +129,9 @@ export default function ConflictScreen({ userProfile, onUpdateProfile, onBack, o
     kernelRef.current = kernel;
 
     matchChannel
+      .on('system', { event: '*' }, (payload) => {
+          console.log("Realtime System Event:", payload);
+      })
       .on('broadcast', { event: 'request_deploy' }, ({ payload }) => {
         if (amIHost && kernelRef.current) {
           const op = ALL_ASSETS.find(a => a.id === payload.opId);
@@ -198,7 +201,13 @@ export default function ConflictScreen({ userProfile, onUpdateProfile, onBack, o
           const iWon = (mySide === 'PLAYER' && payload.winner === 'PLAYER') || (mySide === 'OPPONENT' && payload.winner === 'AI');
           setWinner(iWon ? 'PLAYER' : 'OPPONENT'); onMatchEnd(iWon ? 'Win' : 'Loss');
       })
-      .subscribe();
+      .subscribe((status, err) => {
+          if (err) (window as any).LAST_SYNC_ERROR = err;
+          if (status === 'SUBSCRIBED') (window as any).LAST_SYNC_ERROR = null;
+          if (status === 'TIMED_OUT' || status === 'CLOSED') {
+              (window as any).LAST_SYNC_ERROR = { message: 'CONNECTION INTERRUPTED' };
+          }
+      });
   };
 
   useEffect(() => {

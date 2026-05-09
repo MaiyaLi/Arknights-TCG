@@ -305,7 +305,7 @@ export default function Dashboard({ userProfile, onLogout, onStartTutorial, onUp
             </button>
           )}
         </div>
-        <span className="text-[8px] text-white/30 terminal-text font-bold uppercase">RHODES ISLAND TERMINAL v1.0.7</span>
+        <span className="text-[8px] text-white/30 terminal-text font-bold uppercase">RHODES ISLAND TERMINAL v1.0.8</span>
       </footer>
     </div>
   );

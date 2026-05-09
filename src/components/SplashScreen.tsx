@@ -31,7 +31,7 @@ export default function SplashScreen({ onStart }: SplashScreenProps) {
           [ ARKNIGHTS: TACTICAL SYNC ]
         </h1>
         <p className="text-rhodes-blue/60 terminal-text text-[10px] mb-12">
-          Frontline Mobilization Protocol | v1.0.4-BETA
+          Frontline Mobilization Protocol | v1.0.8-BETA
         </p>
 
         <motion.button
