@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useMemo } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { 
   ChevronLeft, 
@@ -18,7 +18,7 @@ import { BattleKernel, GameUnit, GamePhase } from '../game/BattleKernel';
 import { getSpriteImagePath, getCardImagePath } from '../utils/assetUtils';
 import { RealtimeChannel } from '@supabase/supabase-js';
 
-// Constants from SimulationScreen
+// --- VISUAL TWIN CONSTANTS ---
 const CANVAS_W = 450;
 const CANVAS_H = 400;
 const PROJECT_CONFIG = {
@@ -48,6 +48,8 @@ interface FloatingLabel {
 
 export default function ConflictScreen({ userProfile, onUpdateProfile, onBack, onMatchEnd }: ConflictScreenProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  
+  // -- MATCHMAKING STATE --
   const [matchId, setMatchId] = useState<string | null>(null);
   const [side, setSide] = useState<'PLAYER' | 'OPPONENT' | null>(null);
   const [isQueuing, setIsQueuing] = useState(false);
@@ -55,20 +57,20 @@ export default function ConflictScreen({ userProfile, onUpdateProfile, onBack, o
   const [channel, setChannel] = useState<RealtimeChannel | null>(null);
   const [winner, setWinner] = useState<'PLAYER' | 'OPPONENT' | null>(null);
 
-  // Simulation-Twin State
+  // -- SIMULATION TWIN STATE --
   const [isPaused, setIsPaused] = useState(false);
-  const [phase, setPhase] = useState<GamePhase>('COMMAND');
+  const [countdown, setCountdown] = useState(0);
   const [playerHand, setPlayerHand] = useState<Operator[]>([]);
   const [playerDeck, setPlayerDeck] = useState<Operator[]>([]);
-  const [playerCooldowns, setPlayerCooldowns] = useState<{ op: Operator, turnsRemaining: number }[]>([]);
-  const [mulliganPhase, setMulliganPhase] = useState(false);
+  const [mulliganPhase, setMulliganPhase] = useState(true);
   const [mulliganSelected, setMulliganSelected] = useState<number[]>([]);
   const [selectedLane, setSelectedLane] = useState<number | null>(null);
   const [selectedRow, setSelectedRow] = useState<number | null>(null);
-  const [selectedSlot, setSelectedSlot] = useState<{ lane: number, row: number } | null>(null);
-  const [selectedUnit, setSelectedUnit] = useState<GameUnit | null>(null);
   const [draggingOp, setDraggingOp] = useState<{ op: Operator, index: number } | null>(null);
   const [dragPos, setDragPos] = useState({ x: 0, y: 0 });
+  const [selectedUnit, setSelectedUnit] = useState<GameUnit | null>(null);
+  const [selectedSlot, setSelectedSlot] = useState<{ lane: number, row: number } | null>(null);
+  const [playerCooldowns, setPlayerCooldowns] = useState<{ op: Operator, turnsRemaining: number }[]>([]);
   const [swapSourceId, setSwapSourceId] = useState<string | null>(null);
   const [playerReady, setPlayerReady] = useState(false);
   const [opponentReady, setOpponentReady] = useState(false);
@@ -85,11 +87,11 @@ export default function ConflictScreen({ userProfile, onUpdateProfile, onBack, o
   const spriteImages = useRef<Record<string, HTMLImageElement>>({});
   const kernelRef = useRef<BattleKernel | null>(null);
 
-  // 1. Initial Matchmaking
+  // --- INITIALIZATION ---
   useEffect(() => {
     if (!matchId) joinLobby();
     
-    // Load Sprites
+    // Pre-load all sprites (Simulation Twin)
     ALL_ASSETS.forEach(op => {
       ['Front', 'Back'].forEach(view => {
         const path = getSpriteImagePath(op, view as 'Front' | 'Back');
@@ -116,10 +118,7 @@ export default function ConflictScreen({ userProfile, onUpdateProfile, onBack, o
           let myPair: string[] | null = null;
           for (let i = 0; i < users.length - 1; i += 2) {
             const p = [users[i], users[i+1]];
-            if (p.includes(userProfile.uid)) {
-              myPair = p;
-              break;
-            }
+            if (p.includes(userProfile.uid)) { myPair = p; break; }
           }
           if (myPair) {
             const mId = `match_${myPair.join('_')}`;
@@ -144,6 +143,7 @@ export default function ConflictScreen({ userProfile, onUpdateProfile, onBack, o
     setIsHost(amIHost);
     setMulliganPhase(true);
 
+    // Initial Hand Setup (Simulation Twin)
     const squad = userProfile.squads[userProfile.activeSquadIndex]
       .map(id => ALL_ASSETS.find(a => a.id === id))
       .filter(Boolean) as Operator[];
@@ -153,7 +153,7 @@ export default function ConflictScreen({ userProfile, onUpdateProfile, onBack, o
 
     const matchChannel = supabase.channel(mId);
 
-    // Initialize Kernel
+    // Kernel initialization
     const kernel = new BattleKernel(
       (w) => {
           if (amIHost) {
@@ -192,7 +192,6 @@ export default function ConflictScreen({ userProfile, onUpdateProfile, onBack, o
         if (amIHost && kernelRef.current) {
           const op = ALL_ASSETS.find(a => a.id === payload.opId);
           if (op) {
-            // Coordinate mapping: Row 6 for me is Row 0 for opponent
             const kRow = payload.side === 'PLAYER' ? payload.row : 6 - payload.row;
             const kOwner = payload.side === 'PLAYER' ? 'PLAYER' : 'AI';
             kernelRef.current.deployUnit(op, kOwner, payload.lane, kRow);
@@ -275,7 +274,7 @@ export default function ConflictScreen({ userProfile, onUpdateProfile, onBack, o
     chan.send({ type: 'broadcast', event: 'match_sync', payload: state });
   };
 
-  // 2. Projections (Identical to Simulation)
+  // --- RENDERING (TWIN) ---
   const project = (l: number, r: number, z = 0) => {
     const linearProgress = Math.max(-0.1, r / 6);
     const progress = Math.pow(Math.abs(linearProgress), PROJECT_CONFIG.zFactor) * (linearProgress < 0 ? -1 : 1);
@@ -299,7 +298,6 @@ export default function ConflictScreen({ userProfile, onUpdateProfile, onBack, o
     return nearest.lane === -1 ? { lane: null, row: null } : nearest;
   };
 
-  // 3. Rendering Logic (Identical to Simulation)
   const render = React.useCallback(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
@@ -308,7 +306,7 @@ export default function ConflictScreen({ userProfile, onUpdateProfile, onBack, o
 
     ctx.clearRect(0, 0, CANVAS_W, CANVAS_H);
 
-    // Background Grid
+    // Simulation Background Twin
     ctx.strokeStyle = 'rgba(0, 152, 217, 0.05)'; ctx.lineWidth = 0.5;
     for (let i = 0; i <= 12; i++) {
         const pS = project(-1.5, i * (7 / 12) - 0.5); const pE = project(3.5, i * (7 / 12) - 0.5);
@@ -319,16 +317,10 @@ export default function ConflictScreen({ userProfile, onUpdateProfile, onBack, o
         ctx.beginPath(); ctx.moveTo(pS.x, pS.y); ctx.lineTo(pE.x, pE.y); ctx.stroke();
     }
 
-    // Platforms
+    // Platforms Twin
     for (let r = 0; r < 7; r++) {
       for (let l = 0; l < 3; l++) {
         const isSelected = selectedLane === l && selectedRow === r;
-        const isOccupied = kernelRef.current?.units.some(u => {
-            const displayRow = side === 'PLAYER' ? u.row : 6 - u.row;
-            const displayLane = side === 'PLAYER' ? u.lane : 2 - u.lane;
-            return displayLane === l && displayRow === r;
-        });
-        
         const padSize = isSelected ? 0.43 : 0.4;
         const center = project(l, r);
         const p0 = project(l - padSize, r - padSize);
@@ -340,8 +332,7 @@ export default function ConflictScreen({ userProfile, onUpdateProfile, onBack, o
         const p2d = { x: p2.x, y: p2.y + baseHeight };
         const p3d = { x: p3.x, y: p3.y + baseHeight };
 
-        let color = isSelected ? 'rgba(0, 255, 231, 0.4)' : 'rgba(0, 152, 217, 0.1)';
-        ctx.fillStyle = color;
+        ctx.fillStyle = isSelected ? 'rgba(0, 255, 231, 0.4)' : 'rgba(0, 152, 217, 0.1)';
         ctx.beginPath(); ctx.moveTo(p3.x, p3.y); ctx.lineTo(p2.x, p2.y); ctx.lineTo(p2d.x, p2d.y); ctx.lineTo(p3d.x, p3d.y); ctx.closePath(); ctx.fill();
 
         let surface = isSelected ? 'rgba(0, 152, 217, 0.4)' : (r === 0 ? 'rgba(255, 59, 59, 0.4)' : r === 6 ? 'rgba(0, 255, 231, 0.4)' : 'rgba(10, 10, 20, 0.98)');
@@ -352,7 +343,7 @@ export default function ConflictScreen({ userProfile, onUpdateProfile, onBack, o
       }
     }
 
-    // Units
+    // Units Twin
     kernelRef.current?.units.forEach(u => {
       const displayRow = side === 'PLAYER' ? u.row : 6 - u.row;
       const displayLane = side === 'PLAYER' ? u.lane : 2 - u.lane;
@@ -370,13 +361,12 @@ export default function ConflictScreen({ userProfile, onUpdateProfile, onBack, o
         ctx.restore();
       }
 
-      // HP
       const hpP = u.hp / u.maxHp;
       ctx.fillStyle = 'rgba(0,0,0,0.5)'; ctx.fillRect(basePos.x - 15, basePos.y - 45, 30, 3);
       ctx.fillStyle = mainColor; ctx.fillRect(basePos.x - 15, basePos.y - 45, 30 * hpP, 3);
     });
 
-    // Labels
+    // Damage Labels Twin
     const now = Date.now();
     floatingLabels.current = floatingLabels.current.filter(l => {
       const age = now - l.createdAt;
@@ -404,7 +394,7 @@ export default function ConflictScreen({ userProfile, onUpdateProfile, onBack, o
     return () => cancelAnimationFrame(animId);
   }, [phase, isHost, isPaused, side, selectedLane, selectedRow, draggingOp, render]);
 
-  // 4. Interaction Handlers (Twin Logic)
+  // --- HANDLERS (TWIN) ---
   const handleDragStart = (op: Operator, index: number, e: any) => {
     if (phase !== 'COMMAND') return;
     setDraggingOp({ op, index });
@@ -480,7 +470,7 @@ export default function ConflictScreen({ userProfile, onUpdateProfile, onBack, o
       onMouseMove={handleDragMove} onTouchMove={handleDragMove}
       onMouseUp={handleDragEnd} onTouchEnd={handleDragEnd}
     >
-      {/* Simulation Header Twin */}
+      {/* Simulation Header Twin Port */}
       <div className="p-2 px-4 border-b border-rhodes-border flex justify-between items-center bg-black/95 backdrop-blur-md z-30 shrink-0 shadow-lg">
         <button onClick={onBack} className="flex items-center gap-2 text-white/40 hover:text-rhodes-blue transition-colors group">
           <ChevronLeft className="w-4 h-4 group-hover:-translate-x-1 transition-transform" />
@@ -522,11 +512,11 @@ export default function ConflictScreen({ userProfile, onUpdateProfile, onBack, o
         </button>
       </div>
 
-      {/* Battlefield Twin */}
+      {/* Battlefield Twin Port */}
       <div className="flex-1 relative bg-black/40 overflow-hidden">
         <canvas ref={canvasRef} width={450} height={400} className="w-full h-full cursor-crosshair" />
 
-        {/* Authorize Button Twin */}
+        {/* Authorize Button Twin Port */}
         <AnimatePresence>
           {phase === 'COMMAND' && (
             <motion.div initial={{ scale: 0.9, opacity: 0, y: 20 }} animate={{ scale: 1, opacity: 1, y: 0 }} className="absolute bottom-6 right-6 z-40">
@@ -536,22 +526,30 @@ export default function ConflictScreen({ userProfile, onUpdateProfile, onBack, o
                 className={`rhodes-button glow-blue px-6 py-2.5 flex items-center gap-2 ${playerReady ? 'opacity-50 grayscale' : 'bg-rhodes-blue text-black'}`}
               >
                 {playerReady ? <Loader2 className="w-4 h-4 animate-spin" /> : <Play className="w-4 h-4 fill-current" />}
-                <span className="terminal-text text-[10px] font-black uppercase">{playerReady ? 'Syncing...' : 'Authorize'}</span>
+                <span className="terminal-text text-[10px] font-black uppercase tracking-[0.2em]">{playerReady ? 'Syncing...' : 'Authorize'}</span>
               </button>
-              {opponentReady && <div className="absolute -top-8 right-0 text-[8px] text-rhodes-blue terminal-text animate-pulse">Opponent Ready</div>}
+              {opponentReady && <div className="absolute -top-8 right-0 text-[8px] text-rhodes-blue terminal-text animate-pulse font-black uppercase">Opponent Ready</div>}
             </motion.div>
           )}
         </AnimatePresence>
 
-        {/* Mulligan Twin */}
+        {/* Mulligan Twin Port (Tactical Authorization) */}
         <AnimatePresence>
           {mulliganPhase && (
             <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="absolute inset-0 bg-black/98 z-[200] flex flex-col items-center justify-center p-4 backdrop-blur-md">
-                <h2 className="text-xl font-black terminal-text text-white tracking-widest uppercase mb-8 italic">Tactical Authorization</h2>
-                <div className="flex justify-center gap-2 mb-8">
+                <div className="mb-4 text-center">
+                  <h2 className="text-xl font-black terminal-text text-white tracking-widest uppercase mb-1 italic">Tactical Authorization</h2>
+                  <div className="flex items-center justify-center gap-2">
+                    <div className="h-px w-6 bg-rhodes-blue/30" />
+                    <p className="terminal-text text-[7px] text-rhodes-blue font-bold tracking-[0.2em] uppercase">Initial Link Prep</p>
+                    <div className="h-px w-6 bg-rhodes-blue/30" />
+                  </div>
+                </div>
+
+                <div className="flex justify-center gap-1.5 mb-8 w-full">
                     {playerHand.map((op, idx) => (
                         <div key={op.id} onClick={() => setMulliganSelected(prev => prev.includes(idx) ? prev.filter(i => i !== idx) : [...prev, idx])}
-                             className={`w-16 h-24 border-2 rounded-sm overflow-hidden cursor-pointer ${mulliganSelected.includes(idx) ? 'border-red-500 shadow-[0_0_15px_rgba(239,68,68,0.3)]' : 'border-white/10 hover:border-rhodes-blue/50'}`}>
+                             className={`w-[18vw] max-w-[80px] aspect-[2/3] border-2 rounded-sm overflow-hidden cursor-pointer transition-all ${mulliganSelected.includes(idx) ? 'border-red-500 shadow-[0_0_15px_rgba(239,68,68,0.3)]' : 'border-white/10 hover:border-rhodes-blue/50'}`}>
                             <img src={getCardImagePath(op)} className={`w-full h-full object-contain ${mulliganSelected.includes(idx) ? 'opacity-20 grayscale brightness-50' : 'opacity-70'}`} referrerPolicy="no-referrer" />
                         </div>
                     ))}
@@ -566,12 +564,12 @@ export default function ConflictScreen({ userProfile, onUpdateProfile, onBack, o
                       setPlayerHand(newHand); setPlayerDeck(newDeck);
                    }
                    setMulliganPhase(false);
-                }} className="rhodes-button glow-blue px-10 py-3 text-rhodes-blue font-black terminal-text text-xs uppercase tracking-widest">Confirm Initial Sync</button>
+                }} className="rhodes-button glow-blue px-10 py-2.5 text-rhodes-blue font-black terminal-text text-[10px] uppercase tracking-widest">Confirm Initial Sync</button>
             </motion.div>
           )}
         </AnimatePresence>
 
-        {/* Game Over Twin */}
+        {/* Game Over Twin Port */}
         <AnimatePresence>
           {winner && (
             <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="absolute inset-0 z-[1000] bg-black/90 flex flex-col items-center justify-center backdrop-blur-xl p-8 text-center">
@@ -585,7 +583,7 @@ export default function ConflictScreen({ userProfile, onUpdateProfile, onBack, o
         </AnimatePresence>
       </div>
 
-      {/* Hand Twin */}
+      {/* Hand Twin Port (Deck) */}
       <div className="p-2 bg-[#050505] border-t border-rhodes-border shrink-0 z-20 shadow-2xl">
         <div className="flex justify-between items-center mb-2 px-2">
             <div className="flex items-center gap-4">
@@ -605,7 +603,7 @@ export default function ConflictScreen({ userProfile, onUpdateProfile, onBack, o
                   className={`rhodes-button h-8 px-3 text-[8px] font-black uppercase ${playerHand.length < 6 && uiState.playerDP >= 5 && phase === 'COMMAND' ? 'glow-blue text-rhodes-blue' : 'opacity-30 grayscale pointer-events-none'}`}
                 >Supply 5</button>
             </div>
-            <div className="text-[6px] text-rhodes-blue/40 terminal-text uppercase font-bold">Deck: {playerDeck.length}</div>
+            <div className="text-[6px] text-rhodes-blue/40 terminal-text uppercase font-bold tracking-widest italic">Signal Deck: {playerDeck.length}</div>
         </div>
 
         <div className="flex gap-2 overflow-x-auto pb-1 px-1 custom-scrollbar">
@@ -613,7 +611,7 @@ export default function ConflictScreen({ userProfile, onUpdateProfile, onBack, o
             <div key={idx} onMouseDown={(e) => handleDragStart(op, idx, e)}
                  className={`w-16 h-24 border rounded-sm relative overflow-hidden shrink-0 transition-all ${
                    uiState.playerDP >= op.dp_cost && phase === 'COMMAND'
-                   ? 'border-rhodes-blue/40 bg-rhodes-blue/5' : 'border-white/5 opacity-40 grayscale'
+                   ? 'border-rhodes-blue/40 bg-rhodes-blue/5 shadow-inner' : 'border-white/5 opacity-40 grayscale'
                  } ${draggingOp?.index === idx ? 'opacity-0 scale-95' : ''}`}>
                 <img src={getCardImagePath(op)} className="w-full h-full object-contain opacity-70" referrerPolicy="no-referrer" />
                 <div className="absolute top-0.5 right-0.5 bg-black/80 px-1 py-0.5 rounded-sm border border-rhodes-blue/20">
@@ -630,9 +628,9 @@ export default function ConflictScreen({ userProfile, onUpdateProfile, onBack, o
         </div>
       </div>
 
-      {/* Dragging Twin */}
+      {/* Dragging Ghost Twin Port */}
       {draggingOp && (
-        <div className="fixed pointer-events-none z-[1000] w-16 h-24 border border-rhodes-blue bg-rhodes-blue/20 rounded overflow-hidden"
+        <div className="fixed pointer-events-none z-[1000] w-16 h-24 border border-rhodes-blue bg-rhodes-blue/20 rounded overflow-hidden shadow-2xl"
              style={{ left: dragPos.x - 32, top: dragPos.y - 48, transform: 'scale(1.1)' }}>
           <img src={getCardImagePath(draggingOp.op)} className="w-full h-full object-contain opacity-90" referrerPolicy="no-referrer" />
         </div>
