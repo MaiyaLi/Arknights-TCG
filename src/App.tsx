@@ -270,7 +270,8 @@ export default function App() {
     
     // 3. Background Sync (don't let it block)
     if (newProfile.uid) {
-      setDoc(doc(db, 'users', newProfile.uid), newProfile, { merge: true }).catch(e => console.error(e));
+      const firestorePayload = sanitizeForFirestore(newProfile);
+      setDoc(doc(db, 'users', newProfile.uid), firestorePayload, { merge: true }).catch(e => console.error(e));
     }
     
     setShowRewardNotification(starterPack);
@@ -342,7 +343,8 @@ export default function App() {
     setIsLoading(false);
     
     try {
-      await setDoc(doc(db, 'users', profile.uid), profile, { merge: true });
+      const firestorePayload = sanitizeForFirestore(profile);
+      await setDoc(doc(db, 'users', profile.uid), firestorePayload, { merge: true });
     } catch (e) {
       console.error(e);
     }
@@ -395,6 +397,21 @@ export default function App() {
     }
   };
 
+  const sanitizeForFirestore = (profile: UserProfile) => {
+    return {
+      uid: profile.uid,
+      email: profile.email,
+      displayName: profile.displayName,
+      level: profile.level,
+      exp: profile.exp,
+      currentCurrency: profile.currentCurrency,
+      loginType: profile.loginType,
+      hasCompletedTutorial: profile.hasCompletedTutorial,
+      hasAcceptedTerms: profile.hasAcceptedTerms,
+      updated_at: new Date().toISOString()
+    };
+  };
+
   const handleUpdateProfile = async (profile: UserProfile) => {
     setUserProfile(profile);
     localStorage.setItem('arknights_profile', JSON.stringify(profile));
@@ -427,18 +444,7 @@ export default function App() {
     }
 
     // Keep Firestore as secondary backup for transition, but sanitize to avoid nested array errors
-    const firestorePayload = {
-      uid: profile.uid,
-      email: profile.email,
-      displayName: profile.displayName,
-      level: profile.level,
-      exp: profile.exp,
-      currentCurrency: profile.currentCurrency,
-      loginType: profile.loginType,
-      hasCompletedTutorial: profile.hasCompletedTutorial,
-      hasAcceptedTerms: profile.hasAcceptedTerms,
-      updated_at: new Date().toISOString()
-    };
+    const firestorePayload = sanitizeForFirestore(profile);
 
     setDoc(doc(db, 'users', profile.uid), firestorePayload, { merge: true }).catch(e => {
       console.error("Firestore Sync Error (Basic):", e);
