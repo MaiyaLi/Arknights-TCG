@@ -20,7 +20,7 @@ interface SimulationScreenProps {
   userProfile: UserProfile;
   onUpdateProfile: (profile: UserProfile) => void;
   onBack: () => void;
-  onVictory: () => void;
+  onMatchEnd: (result: 'Win' | 'Loss') => void;
 }
 
 interface FloatingLabel {
@@ -33,7 +33,7 @@ interface FloatingLabel {
   createdAt: number;
 }
 
-export default function SimulationScreen({ userProfile, onUpdateProfile, onBack, onVictory }: SimulationScreenProps) {
+export default function SimulationScreen({ userProfile, onUpdateProfile, onBack, onMatchEnd }: SimulationScreenProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
 
   // 1. State declarations first
@@ -70,7 +70,7 @@ export default function SimulationScreen({ userProfile, onUpdateProfile, onBack,
 
   // 2. Handlers used in kernel initialization
   const handleGameOver = (winner: 'PLAYER' | 'AI') => {
-    if (winner === 'PLAYER') onVictory();
+    onMatchEnd(winner === 'PLAYER' ? 'Win' : 'Loss');
     setWinner(winner);
     setIsPaused(true);
   };

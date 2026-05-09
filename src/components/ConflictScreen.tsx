@@ -27,10 +27,10 @@ interface ConflictScreenProps {
   userProfile: UserProfile;
   onUpdateProfile: (p: UserProfile) => void;
   onBack: () => void;
-  onVictory: () => void;
+  onMatchEnd: (result: 'Win' | 'Loss') => void;
 }
 
-export default function ConflictScreen({ userProfile, onUpdateProfile, onBack, onVictory }: ConflictScreenProps) {
+export default function ConflictScreen({ userProfile, onUpdateProfile, onBack, onMatchEnd }: ConflictScreenProps) {
   const [matchId, setMatchId] = useState<string | null>(null);
   const [side, setSide] = useState<'PLAYER' | 'OPPONENT' | null>(null);
   const [isQueuing, setIsQueuing] = useState(false);
@@ -167,7 +167,7 @@ export default function ConflictScreen({ userProfile, onUpdateProfile, onBack, o
       })
       .on('broadcast', { event: 'game_over' }, ({ payload }) => {
         const iWon = (mySide === 'PLAYER' && payload.winner === 'PLAYER') || (mySide === 'OPPONENT' && payload.winner === 'AI');
-        if (iWon) onVictory();
+        onMatchEnd(iWon ? 'Win' : 'Loss');
         setMatchResult(iWon ? 'VICTORY' : 'DEFEAT');
       })
       .subscribe();

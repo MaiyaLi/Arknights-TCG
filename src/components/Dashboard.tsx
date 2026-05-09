@@ -1,5 +1,5 @@
 import React from 'react';
-import { motion, AnimatePresence } from 'motion/react';
+import { motion, AnimatePresence } from 'framer-motion';
 import { 
   Shield, 
   Zap, 
@@ -24,9 +24,11 @@ interface DashboardProps {
   onLogout: () => void;
   onStartTutorial: () => void;
   onUpdateProfile: (p: UserProfile) => void;
+  onLinkGoogle: () => void;
+  onOpenMissions: () => void;
 }
 
-export default function Dashboard({ userProfile, onLogout, onStartTutorial, onUpdateProfile }: DashboardProps) {
+export default function Dashboard({ userProfile, onLogout, onStartTutorial, onUpdateProfile, onLinkGoogle, onOpenMissions }: DashboardProps) {
   const [showSelector, setShowSelector] = React.useState(false);
   const [isEditingName, setIsEditingName] = React.useState(false);
   const [newName, setNewName] = React.useState(userProfile.displayName || '');
@@ -113,26 +115,45 @@ export default function Dashboard({ userProfile, onLogout, onStartTutorial, onUp
           <div className="flex flex-col items-end">
             <div className="flex items-center gap-1">
               <Zap className="w-2.5 h-2.5 text-orange-500" />
-              <span className="terminal-text font-black text-[10px] text-white">{userProfile.currentCurrency.orundum}</span>
+              <motion.span 
+                key={userProfile.currentCurrency.orundum}
+                initial={{ scale: 1.5, color: '#f97316' }}
+                animate={{ scale: 1, color: '#ffffff' }}
+                className="terminal-text font-black text-[10px] text-white"
+              >
+                {userProfile.currentCurrency.orundum}
+              </motion.span>
             </div>
             <p className="text-[6px] text-white/20 terminal-text uppercase font-black">Orundum</p>
           </div>
           <div className="flex flex-col items-end">
             <div className="flex items-center gap-1">
               <Award className="w-2.5 h-2.5 text-rhodes-blue" />
-              <span className="terminal-text font-black text-[10px] text-white">{userProfile.currentCurrency.certificates}</span>
+              <motion.span 
+                key={userProfile.currentCurrency.certificates}
+                initial={{ scale: 1.5, color: '#00baff' }}
+                animate={{ scale: 1, color: '#ffffff' }}
+                className="terminal-text font-black text-[10px] text-white"
+              >
+                {userProfile.currentCurrency.certificates}
+              </motion.span>
             </div>
             <p className="text-[6px] text-white/20 terminal-text uppercase font-black">Certificates</p>
           </div>
           
+          <button 
+            onClick={onOpenMissions}
+            className="bg-rhodes-blue/10 border border-rhodes-blue/30 px-2 py-1 rounded-sm flex items-center gap-1 hover:bg-rhodes-blue/20 transition-all group relative"
+          >
+            <div className="absolute -top-1 -right-1 w-2 h-2 bg-red-500 rounded-full animate-ping opacity-75" />
+            <div className="absolute -top-1 -right-1 w-2 h-2 bg-red-500 rounded-full" />
+            <Shield className="w-2.5 h-2.5 text-rhodes-blue" />
+            <span className="text-[6px] terminal-text font-black text-rhodes-blue">MISSIONS</span>
+          </button>
+
           {userProfile.loginType === 'guest' && (
             <button 
-              onClick={(e) => {
-                e.stopPropagation();
-                // Pass a specific flag to App to trigger Google Login
-                (window as any).triggerGoogleLink = true;
-                onLogout(); 
-              }}
+              onClick={onLinkGoogle}
               className="bg-white/5 border border-white/10 px-2 py-1 rounded-sm flex items-center gap-1 hover:bg-white/10 transition-all group"
             >
               <RefreshCcw className="w-2.5 h-2.5 text-rhodes-blue group-hover:rotate-180 transition-transform duration-500" />

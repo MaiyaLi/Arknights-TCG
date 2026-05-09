@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { auth, signInWithGoogle, logOut, db } from './firebase';
-import { onAuthStateChanged } from 'firebase/auth';
+import { onAuthStateChanged, signInWithPopup, signInWithRedirect, GoogleAuthProvider } from 'firebase/auth';
 import { doc, getDoc, setDoc } from 'firebase/firestore';
+import { supabase } from './supabase';
 import { AppState, UserProfile } from './types';
 import TerminalOverlay from './components/TerminalOverlay';
 import SplashScreen from './components/SplashScreen';
@@ -16,10 +17,13 @@ import LogisticsTerminal from './components/LogisticsTerminal';
 import TutorialScreen from './components/TutorialScreen';
 import ConflictScreen from './components/ConflictScreen';
 import SetupProfileScreen from './components/SetupProfileScreen';
-import { ErrorBoundary } from './ErrorBoundary';
+import OperatorHub from './components/OperatorHub';
+import LevelUpModal from './components/LevelUpModal';
+import MissionsOverlay from './components/MissionsOverlay';
+import ErrorBoundary from './ErrorBoundary';
 import { ALL_ASSETS } from './data/operators';
 import { getCardImagePath } from './utils/assetUtils';
-import { motion, AnimatePresence } from 'motion/react';
+import { motion, AnimatePresence } from 'framer-motion';
 import { 
   Home, 
   Swords, 
@@ -28,7 +32,8 @@ import {
   Search, 
   ShoppingBag, 
   Lock,
-  CheckCircle2
+  CheckCircle2,
+  MessageSquare
 } from 'lucide-react';
 
 const INITIAL_CURRENCY = { orundum: 1000, certificates: 0 };
@@ -37,9 +42,25 @@ const INITIAL_INVENTORY = {};
 export default function App() {
   const [appState, setAppState] = useState<AppState>('SPLASH');
   const [userProfile, setUserProfile] = useState<UserProfile | null>(null);
-  const [isLoading, setIsLoading] = useState(false);
+  const [isLoading, setIsLoading] = useState(true); // Start as true
   const [showDailyLogin, setShowDailyLogin] = useState(false);
   const [showRewardNotification, setShowRewardNotification] = useState<string[] | null>(null);
+  const [showLevelUp, setShowLevelUp] = useState(false);
+  const [levelUpData, setLevelUpData] = useState({ level: 0, orundum: 0, certificates: 0 });
+  const [showMissions, setShowMissions] = useState(false);
+
+  // Global Error Listener
+  useEffect(() => {
+    const handleError = (event: ErrorEvent) => {
+      console.error("Global Error Caught:", event.error);
+      // Only alert on serious app-breaking errors during auth
+      if (appState === 'SPLASH' || isLoading) {
+        alert("CRITICAL SYSTEM ERROR: " + (event.error?.message || "Unknown Failure"));
+      }
+    };
+    window.addEventListener('error', handleError);
+    return () => window.removeEventListener('error', handleError);
+  }, [appState, isLoading]);
 
   // Initialize from LocalStorage
   useEffect(() => {
@@ -59,148 +80,141 @@ export default function App() {
       }
     }
 
+    // Auth state listener handles everything
+    // Safety timeout: If auth takes too long, stop loading so user can try guest login
+    const safetyTimeout = setTimeout(() => {
+      setIsLoading(false);
+    }, 4000);
+
     const unsubscribe = onAuthStateChanged(auth, async (user) => {
+      clearTimeout(safetyTimeout);
       if (user) {
         const hasAccepted = localStorage.getItem('arknights_terms_accepted') === 'true';
         const savedProfileStr = localStorage.getItem('arknights_profile');
         let localProfile: UserProfile | null = savedProfileStr ? JSON.parse(savedProfileStr) : null;
 
         try {
-          const docRef = doc(db, 'users', user.uid);
-          const docSnap = await getDoc(docRef);
-
-          if (docSnap.exists()) {
-            const profile = docSnap.data() as UserProfile;
-            
-            // Link Guest data to Google account if migrating
-            if (localProfile?.loginType === 'guest') {
-              profile.collection = [...new Set([...profile.collection, ...localProfile.collection])];
-              profile.currentCurrency.orundum = Math.max(profile.currentCurrency.orundum, localProfile.currentCurrency.orundum);
-              profile.currentCurrency.certificates = Math.max(profile.currentCurrency.certificates, localProfile.currentCurrency.certificates);
-              profile.level = Math.max(profile.level || 1, localProfile.level || 1);
-              profile.exp = Math.max(profile.exp || 0, localProfile.exp || 0);
-              profile.hasCompletedTutorial = profile.hasCompletedTutorial || localProfile.hasCompletedTutorial;
-              profile.hasAcceptedTerms = profile.hasAcceptedTerms || localProfile.hasAcceptedTerms;
-              profile.loginType = 'google';
-            }
-
-            // Migration for old profiles in cloud
-            if (!profile.squads) {
-              const oldSquad = (profile as any).activeSquad || [];
-              profile.squads = [[...oldSquad], [], []];
-              profile.activeSquadIndex = 0;
-            }
-            if (profile.pity5 === undefined) profile.pity5 = 0;
-            if (profile.pity6 === undefined) profile.pity6 = 0;
-            if (profile.level === undefined) profile.level = 1;
-            if (profile.exp === undefined) profile.exp = 0;
-            if ((profile.currentCurrency as any).shards !== undefined) {
-               profile.currentCurrency.orundum = (profile.currentCurrency as any).shards;
-               delete (profile.currentCurrency as any).shards;
-            }
-
-        try {
-          // 1. Check Supabase
-          const { data: sbProfile, error: sbError } = await supabase
-            .from('profiles')
-            .select('*')
-            .eq('id', user.uid)
-            .single();
-
-          if (sbProfile && !sbError) {
-            const profile: UserProfile = {
-              uid: sbProfile.id,
-              displayName: sbProfile.display_name,
-              email: sbProfile.email || '',
-              level: sbProfile.level,
-              exp: sbProfile.exp,
-              currentCurrency: { orundum: sbProfile.orundum, certificates: sbProfile.certificates },
-              collection: sbProfile.collection,
-              squads: sbProfile.squads,
-              hasCompletedTutorial: sbProfile.has_completed_tutorial,
-              hasAcceptedTerms: sbProfile.has_accepted_terms,
-              loginType: sbProfile.login_type as any,
-              lastClaimedDate: sbProfile.last_claimed_date || '',
-              activeSquadIndex: sbProfile.active_squad_index || 0
-            };
-            setUserProfile(profile);
-            localStorage.setItem('arknights_profile', JSON.stringify(profile));
-            checkDailyLogin(profile);
-            setAppState(profile.hasCompletedTutorial ? 'DASHBOARD' : 'TUTORIAL');
-            setIsLoading(false);
-            return;
-          }
-
-          // 2. Fallback to Firestore
-          const userDoc = await getDoc(doc(db, 'users', user.uid));
-          if (userDoc.exists()) {
-            const profile = userDoc.data() as UserProfile;
-            
-            // Check for guest-to-google migration
-            if (localProfile && !user.isAnonymous && localProfile.loginType === 'guest' && profile.collection.length <= 1) {
-              const mergedProfile: UserProfile = {
-                ...localProfile,
-                uid: user.uid,
-                email: user.email || '',
-                loginType: 'google',
-                displayName: user.displayName || localProfile.displayName
+          // alert("DEBUG: Auth State - User found: " + user.uid);
+          
+          // SYNC LOGIC: Check cloud vs local
+          let cloudProfile: UserProfile | null = null;
+          try {
+            // Check Supabase first as it's the primary DB now
+            const { data: sbProfile } = await supabase.from('profiles').select('*').eq('id', user.uid).single();
+            if (sbProfile) {
+              // Convert DB format back to UserProfile type if necessary
+              cloudProfile = {
+                uid: sbProfile.id,
+                email: sbProfile.email,
+                displayName: sbProfile.display_name,
+                level: sbProfile.level,
+                exp: sbProfile.exp,
+                currentCurrency: { orundum: sbProfile.orundum, certificates: sbProfile.certificates },
+                collection: sbProfile.collection,
+                squads: sbProfile.squads,
+                hasCompletedTutorial: sbProfile.has_completed_tutorial,
+                hasAcceptedTerms: sbProfile.has_accepted_terms,
+                loginType: sbProfile.login_type,
+                affinity: sbProfile.affinity || {},
+                lastMatchResult: sbProfile.last_match_result,
+                inventory: INITIAL_INVENTORY, // Default for now
+                lastLogin: new Date().toISOString(),
+                loginStreak: localProfile?.loginStreak || 1,
+                lastClaimedDate: localProfile?.lastClaimedDate || null,
+                pity5: localProfile?.pity5 || 0,
+                pity6: localProfile?.pity6 || 0,
+                unlockedSkills: localProfile?.unlockedSkills || [],
+                activeSquadIndex: 0
               };
-              handleUpdateProfile(mergedProfile);
-              return;
             }
-
-            setUserProfile(profile);
-            localStorage.setItem('arknights_profile', JSON.stringify(profile));
-            checkDailyLogin(profile);
-            setAppState(profile.hasCompletedTutorial ? 'DASHBOARD' : 'TUTORIAL');
-          } else {
-            // 3. New user or local migration
-            let profileToMigrate = localProfile;
-            if (!profileToMigrate || profileToMigrate.loginType !== 'guest') {
-              profileToMigrate = {
-                uid: user.uid,
-                email: user.email || '',
-                displayName: user.displayName || 'Doctor',
-                hasAcceptedTerms: hasAccepted,
-                hasCompletedTutorial: false,
-                loginType: user.isAnonymous ? 'guest' : 'google',
-                currentCurrency: INITIAL_CURRENCY,
-                collection: ['ami_001'],
-                squads: [['ami_001'], [], []],
-                activeSquadIndex: 0,
-                level: 1,
-                exp: 0,
-                lastClaimedDate: null,
-              } as any;
-            } else {
-              profileToMigrate.uid = user.uid;
-              profileToMigrate.email = user.email || '';
-              profileToMigrate.loginType = 'google';
-            }
-            
-            handleUpdateProfile(profileToMigrate!);
-            setAppState(profileToMigrate!.hasCompletedTutorial ? 'DASHBOARD' : 'TUTORIAL');
+          } catch (e) {
+            console.warn("Cloud fetch failed:", e);
           }
-        } catch (error) {
-          console.error("Error fetching user profile:", error);
+
+          if (cloudProfile) {
+            console.log("Cloud profile found. Using cloud data.");
+            activeProfile = cloudProfile;
+            // Optionally merge guest cards if they aren't in cloud
+            if (localProfile && localProfile.loginType === 'guest') {
+              const uniqueCards = [...new Set([...activeProfile.collection, ...localProfile.collection])];
+              activeProfile.collection = uniqueCards;
+            }
+          } else if (localProfile && localProfile.loginType === 'guest') {
+            console.log("No cloud profile. Merging guest data to new Google account.");
+            activeProfile = {
+              ...localProfile,
+              uid: user.uid,
+              email: user.email || '',
+              loginType: 'google',
+              displayName: user.displayName || localProfile.displayName
+            };
+          } else {
+            activeProfile = {
+              uid: user.uid,
+              email: user.email || '',
+              displayName: user.displayName || 'Doctor',
+              hasAcceptedTerms: hasAccepted,
+              hasCompletedTutorial: false,
+              loginType: 'google',
+              currentCurrency: INITIAL_CURRENCY,
+              inventory: INITIAL_INVENTORY,
+              collection: ['ami_001'],
+              unlockedSkills: [],
+              squads: [['ami_001'], [], []],
+              activeSquadIndex: 0,
+              lastLogin: new Date().toISOString(),
+              level: 1,
+              exp: 0,
+              loginStreak: 1,
+              lastClaimedDate: null,
+              pity5: 0,
+              pity6: 0,
+              affinity: {},
+              lastMatchResult: null,
+            };
+          }
+
+          // Update state and persistence
+          setUserProfile(activeProfile);
+          localStorage.setItem('arknights_profile', JSON.stringify(activeProfile));
+          await handleUpdateProfile(activeProfile); // Save to cloud
+
+          if (!activeProfile.hasAcceptedTerms) {
+            setAppState('TERMS');
+          } else {
+            setAppState(activeProfile.hasCompletedTutorial ? 'DASHBOARD' : 'TUTORIAL');
+          }
+          
+          setIsLoading(false);
+
+        } catch (error: any) {
+          console.error("Auth error:", error);
+          alert("HANDSHAKE ERROR: " + error.code + " - " + error.message);
+          setIsLoading(false);
         }
       } else {
-        if (userProfile?.loginType === 'google') {
+        // User is logged out
+        const savedProfileStr = localStorage.getItem('arknights_profile');
+        if (savedProfileStr) {
+          const profile = JSON.parse(savedProfileStr);
+          if (profile.loginType === 'guest') {
+            setUserProfile(profile);
+          } else {
+            setUserProfile(null);
+            setAppState('SPLASH');
+          }
+        } else {
           setUserProfile(null);
           setAppState('SPLASH');
         }
+        setIsLoading(false);
       }
     });
 
     return () => unsubscribe();
   }, []);
 
-  useEffect(() => {
-    if ((window as any).triggerGoogleLink) {
-      (window as any).triggerGoogleLink = false;
-      handleGoogleLogin();
-    }
-  }, [appState]);
+  // The triggerGoogleLink flag is no longer used to prevent reload loops
 
   const checkDailyLogin = (profile: UserProfile) => {
     const today = new Date().toDateString();
@@ -318,6 +332,8 @@ export default function App() {
       lastClaimedDate: null,
       pity5: 0,
       pity6: 0,
+      affinity: {},
+      lastMatchResult: null,
     };
 
     setUserProfile(profile);
@@ -341,13 +357,30 @@ export default function App() {
     }
   };
 
-  const handleGoogleLogin = async () => {
+  const handleGoogleLogin = async (e?: React.MouseEvent) => {
+    if (e) { e.preventDefault(); e.stopPropagation(); }
     try {
-      setIsLoading(true);
-      await signInWithGoogle();
-      // Auth state listener will handle the transition
-    } catch (error) {
-      console.error("Login failed:", error);
+      const provider = new GoogleAuthProvider();
+      provider.setCustomParameters({ prompt: 'select_account' });
+      
+      console.log("Attempting Google Login Popup...");
+      try {
+        await signInWithPopup(auth, provider);
+      } catch (popupError: any) {
+        console.error("Popup Error:", popupError.code, popupError.message);
+        if (popupError.code === 'auth/popup-blocked' || 
+            popupError.code === 'auth/cancelled-popup-request' || 
+            popupError.code === 'auth/popup-closed-by-user') {
+          alert("Neural Link: Popup blocked/closed. Redirecting to Google Login page...");
+          await signInWithRedirect(auth, provider);
+        } else {
+          alert(`Neural Link Failed: ${popupError.code}\n${popupError.message}`);
+          throw popupError;
+        }
+      }
+    } catch (error: any) {
+      console.error("Critical Auth Error:", error);
+      alert(`CRITICAL AUTH ERROR: ${error.code}\n${error.message}`);
       setIsLoading(false);
     }
   };
@@ -382,6 +415,8 @@ export default function App() {
           has_completed_tutorial: profile.hasCompletedTutorial,
           has_accepted_terms: profile.hasAcceptedTerms,
           login_type: profile.loginType,
+          affinity: profile.affinity || {},
+          last_match_result: profile.lastMatchResult,
           updated_at: new Date().toISOString()
         });
       
@@ -406,17 +441,79 @@ export default function App() {
     profile.exp += xpGain;
     profile.currentCurrency.orundum += orundumGain;
 
+    profile.lastMatchResult = 'Win';
+
+    // Update Missions
+    const missionId = type === 'SIM' ? 'win_sim' : 'win_pvp';
+    if (!profile.missions) profile.missions = {};
+    if (!profile.missions[missionId]) profile.missions[missionId] = { progress: 0, claimed: false };
+    if (!profile.missions[missionId].claimed) {
+       profile.missions[missionId].progress = Math.min(1, profile.missions[missionId].progress + 1);
+    }
+    
+    if (!profile.missions['play_matches']) profile.missions['play_matches'] = { progress: 0, claimed: false };
+    if (!profile.missions['play_matches'].claimed) {
+       profile.missions['play_matches'].progress = Math.min(3, profile.missions['play_matches'].progress + 1);
+    }
+
+    // Boost affinity for squad members
+    const activeSquad = profile.squads[profile.activeSquadIndex];
+    if (!profile.affinity) profile.affinity = {};
+    activeSquad.forEach(opId => {
+      profile.affinity[opId] = (profile.affinity[opId] || 0) + 1;
+    });
+
     // Level up logic
+    const oldLevel = userProfile.level;
     const expNeeded = profile.level * 100;
+    let leveledUp = false;
+    let totalOrundumReward = 0;
+    let totalCertReward = 0;
+
     while (profile.exp >= expNeeded) {
       profile.exp -= expNeeded;
       profile.level += 1;
-      // Level up reward!
-      profile.currentCurrency.orundum += 500;
-      profile.currentCurrency.certificates += 10;
+      totalOrundumReward += 500;
+      totalCertReward += 10;
+      leveledUp = true;
+    }
+
+    if (leveledUp) {
+       profile.currentCurrency.orundum += totalOrundumReward;
+       profile.currentCurrency.certificates += totalCertReward;
+       setLevelUpData({ level: profile.level, orundum: totalOrundumReward, certificates: totalCertReward });
+       setShowLevelUp(true);
     }
 
     handleUpdateProfile(profile);
+  };
+
+  const handleClaimMission = (missionId: string) => {
+    if (!userProfile || !userProfile.missions?.[missionId]) return;
+    
+    const profile = { ...userProfile };
+    const mission = profile.missions[missionId];
+    
+    // Find reward amount
+    const reward = missionId === 'win_pvp' ? 500 : missionId === 'win_sim' ? 200 : missionId === 'chat_op' ? 100 : 300;
+    
+    profile.currentCurrency.orundum += reward;
+    profile.missions[missionId].claimed = true;
+    
+    handleUpdateProfile(profile);
+  };
+
+  const handleMatchEnd = (result: 'Win' | 'Loss') => {
+    if (!userProfile) return;
+    let profile = { ...userProfile };
+    profile.lastMatchResult = result;
+    
+    if (result === 'Loss') {
+       // Losses don't gain XP/Orundum in this simple version, but record result
+       handleUpdateProfile(profile);
+    } else {
+       handleWinMatch('SIM'); // Defaulting to SIM for generic end if not specified
+    }
   };
 
   const showNav = userProfile && !['SPLASH', 'TERMS', 'LOGIN', 'SIMULATION', 'CONFLICT', 'TUTORIAL', 'SETUP_PROFILE'].includes(appState);
@@ -471,6 +568,8 @@ export default function App() {
                   onLogout={handleLogout}
                   onStartTutorial={() => setAppState('TUTORIAL')}
                   onUpdateProfile={handleUpdateProfile}
+                  onLinkGoogle={handleGoogleLogin}
+                  onOpenMissions={() => setShowMissions(true)}
                 />
                 <DailyLoginOverlay 
                   isOpen={showDailyLogin}
@@ -478,8 +577,23 @@ export default function App() {
                   loginStreak={userProfile.loginStreak}
                 />
 
+                <LevelUpModal 
+                  isOpen={showLevelUp}
+                  level={levelUpData.level}
+                  orundum={levelUpData.orundum}
+                  certificates={levelUpData.certificates}
+                  onClose={() => setShowLevelUp(false)}
+                />
+
+                <MissionsOverlay 
+                  isOpen={showMissions}
+                  userProfile={userProfile}
+                  onClaim={handleClaimMission}
+                  onClose={() => setShowMissions(false)}
+                />
+
                 {showRewardNotification && (
-                  <div className="fixed inset-0 z-[200] flex items-center justify-center p-6 bg-black/90 backdrop-blur-xl">
+                  <div className="absolute inset-0 z-[200] flex items-center justify-center p-6 bg-black/90 backdrop-blur-xl">
                      <motion.div 
                        initial={{ scale: 0.95, opacity: 0, y: 20 }}
                        animate={{ scale: 1, opacity: 1, y: 0 }}
@@ -578,7 +692,7 @@ export default function App() {
                   userProfile={userProfile}
                   onUpdateProfile={handleUpdateProfile}
                   onBack={() => setAppState('DASHBOARD')}
-                  onVictory={() => handleWinMatch('SIM')}
+                  onMatchEnd={(res) => handleMatchEnd(res)}
                 />
               </motion.div>
             )}
@@ -595,7 +709,7 @@ export default function App() {
                     userProfile={userProfile}
                     onUpdateProfile={handleUpdateProfile}
                     onBack={() => setAppState('DASHBOARD')}
-                    onVictory={() => handleWinMatch('PVP')}
+                    onMatchEnd={(res) => handleMatchEnd(res)}
                   />
                 </ErrorBoundary>
               </motion.div>
@@ -615,6 +729,21 @@ export default function App() {
                 />
               </motion.div>
             )}
+            {appState === 'HUB' && userProfile && (
+              <motion.div 
+                key="hub" 
+                initial={{ opacity: 0, x: 20 }} 
+                animate={{ opacity: 1, x: 0 }}
+                exit={{ opacity: 0, x: -20 }}
+                className="h-full"
+              >
+                <OperatorHub 
+                  userProfile={userProfile}
+                  onUpdateProfile={handleUpdateProfile}
+                  onBack={() => setAppState('DASHBOARD')}
+                />
+              </motion.div>
+            )}
           </AnimatePresence>
         </div>
 
@@ -626,6 +755,7 @@ export default function App() {
               { id: 'SIMULATION', icon: Cpu, label: 'SIM' },
               { id: 'PERSONNEL', icon: Users, label: 'UNITS' },
               { id: 'HEADHUNTING', icon: Search, label: 'RECRUIT' },
+              { id: 'HUB', icon: MessageSquare, label: 'HUB' },
               { id: 'SHOP', icon: ShoppingBag, label: 'SHOP' },
             ].map(item => (
               <button

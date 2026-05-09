@@ -27,6 +27,10 @@ export interface UserProfile {
   lastClaimedDate: string | null;
   pity5: number; // Counter for 5-star pity (guaranteed at 10)
   pity6: number; // Counter for 6-star pity (guaranteed at 90)
+  affinity: Record<string, number>; // Operator ID -> Affinity Level (0-100)
+  chatHistory?: Record<string, { role: 'user' | 'model', parts: { text: string }[] }[]>;
+  missions?: Record<string, { progress: number, claimed: boolean }>;
+  lastMatchResult: 'Win' | 'Loss' | null;
 }
 
-export type AppState = 'SPLASH' | 'TERMS' | 'LOGIN' | 'LOADING' | 'DASHBOARD' | 'HEADHUNTING' | 'PERSONNEL' | 'SIMULATION' | 'SHOP' | 'TUTORIAL' | 'CONFLICT' | 'SETUP_PROFILE';
+export type AppState = 'SPLASH' | 'TERMS' | 'LOGIN' | 'LOADING' | 'DASHBOARD' | 'HEADHUNTING' | 'PERSONNEL' | 'SIMULATION' | 'SHOP' | 'TUTORIAL' | 'CONFLICT' | 'SETUP_PROFILE' | 'HUB';
