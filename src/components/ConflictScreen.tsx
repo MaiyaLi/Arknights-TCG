@@ -108,7 +108,10 @@ export default function ConflictScreen({ userProfile, onUpdateProfile, onBack, o
   const joinLobby = async () => {
     setIsQueuing(true);
     const lobbyChannel = supabase.channel('lobby', { config: { presence: { key: userProfile.uid } } });
+    let matchStarted = false;
+
     lobbyChannel.on('presence', { event: 'sync' }, () => {
+        if (matchStarted) return;
         const state = lobbyChannel.presenceState();
         const users = Object.keys(state).sort();
         if (users.length >= 2) {
@@ -118,10 +121,15 @@ export default function ConflictScreen({ userProfile, onUpdateProfile, onBack, o
             if (p.includes(userProfile.uid)) { myPair = p; break; }
           }
           if (myPair) {
+            matchStarted = true;
             const mId = `match_${myPair.join('_')}`;
             setMatchId(mId);
             setSide(myPair[0] === userProfile.uid ? 'PLAYER' : 'OPPONENT');
-            setTimeout(() => { startMatch(mId, myPair![0] === userProfile.uid); lobbyChannel.unsubscribe(); }, 1000);
+            
+            // CRITICAL: Transition to match but stay in lobby presence for 5s 
+            // so the other person has time to see the same sync event!
+            startMatch(mId, myPair[0] === userProfile.uid);
+            setTimeout(() => { lobbyChannel.unsubscribe(); }, 5000);
           }
         }
       }).subscribe(async (status) => {
