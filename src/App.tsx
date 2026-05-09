@@ -268,11 +268,13 @@ export default function App() {
     localStorage.setItem('arknights_profile', JSON.stringify(newProfile));
     localStorage.setItem('arknights_tutorial_completed', 'true');
     
-    // 3. Background Sync (don't let it block)
+    // Firestore sync disabled to prevent nested array errors. Supabase is primary.
+    /*
     if (newProfile.uid) {
       const firestorePayload = sanitizeForFirestore(newProfile);
       setDoc(doc(db, 'users', newProfile.uid), firestorePayload, { merge: true }).catch(e => console.error(e));
     }
+    */
     
     setShowRewardNotification(starterPack);
   };
@@ -342,12 +344,15 @@ export default function App() {
     localStorage.setItem('arknights_profile', JSON.stringify(profile));
     setIsLoading(false);
     
+    // Firestore sync disabled
+    /*
     try {
       const firestorePayload = sanitizeForFirestore(profile);
       await setDoc(doc(db, 'users', profile.uid), firestorePayload, { merge: true });
     } catch (e) {
       console.error(e);
     }
+    */
     
     checkDailyLogin(profile);
 
@@ -443,12 +448,14 @@ export default function App() {
       console.error("Supabase Operation Failed:", e);
     }
 
-    // Keep Firestore as secondary backup for transition, but sanitize to avoid nested array errors
+    // Firestore sync disabled to prevent nested array errors. Supabase is primary.
+    /*
     const firestorePayload = sanitizeForFirestore(profile);
 
     setDoc(doc(db, 'users', profile.uid), firestorePayload, { merge: true }).catch(e => {
       console.error("Firestore Sync Error (Basic):", e);
     });
+    */
   };
 
   const handleWinMatch = (type: 'SIM' | 'PVP') => {
