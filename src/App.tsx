@@ -140,7 +140,6 @@ export default function App() {
             // (Cloud profile might be empty or basic), merge the local guest progress.
             if (localProfile && localProfile.loginType === 'guest') {
               console.log("Merging local guest data into existing cloud profile...");
-              // Merge collection and affinity
               const uniqueCards = [...new Set([...activeProfile.collection, ...localProfile.collection])];
               activeProfile.collection = uniqueCards;
               
@@ -152,7 +151,6 @@ export default function App() {
                 });
               }
               
-              // Use the higher level/exp
               if (localProfile.level > activeProfile.level) {
                 activeProfile.level = localProfile.level;
                 activeProfile.exp = localProfile.exp;
@@ -167,7 +165,10 @@ export default function App() {
               loginType: 'google',
               displayName: user.displayName || localProfile.displayName
             };
-          } else {
+          } else if (user.providerData.length > 0) {
+            // It's a Google user, but no cloud profile was found AND no local guest profile exists.
+            // This is either a TRULY new user, or a sync failure.
+            console.log("Google user with no profile found. Creating fresh profile.");
             activeProfile = {
               uid: user.uid,
               email: user.email || '',
@@ -191,12 +192,17 @@ export default function App() {
               affinity: {},
               lastMatchResult: null,
             };
+          } else {
+             // Fallback for unexpected cases
+             throw new Error("Unable to resolve tactical profile.");
           }
 
           // Update state and persistence
           setUserProfile(activeProfile);
           localStorage.setItem('arknights_profile', JSON.stringify(activeProfile));
-          await handleUpdateProfile(activeProfile); // Save to cloud
+          
+          // CRITICAL: Ensure cloud is updated IMMEDIATELY
+          await handleUpdateProfile(activeProfile); 
 
           if (!activeProfile.hasAcceptedTerms) {
             setAppState('TERMS');
@@ -459,13 +465,13 @@ export default function App() {
           affinity: profile.affinity || {},
           last_match_result: profile.lastMatchResult,
           updated_at: new Date().toISOString()
-        });
+        }, { onConflict: 'id' });
       
       if (error) {
-        console.error("Supabase Sync Error:", error);
-        // Alert the user if sync fails significantly
-        if (error.code !== 'PGRST116') { // Ignore "not found" error for initial saves
-           // alert("Neural Link Sync Error: Your progress may not be saved to the cloud. Please check your connection.");
+        console.error("Supabase Sync Error:", error.message);
+        // Alert only on non-standard errors
+        if (error.code !== 'PGRST116') {
+           console.warn("Handshake Warning: Sync failed.", error.code);
         }
       }
     } catch (e) {
