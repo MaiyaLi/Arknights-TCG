@@ -18,7 +18,7 @@ import { BattleKernel, GameUnit, GamePhase } from '../game/BattleKernel';
 import { getSpriteImagePath, getCardImagePath } from '../utils/assetUtils';
 import { RealtimeChannel } from '@supabase/supabase-js';
 
-// --- VISUAL TWIN CONSTANTS ---
+// --- VISUAL TWIN CONSTANTS (PIXEL PERFECT MIRROR) ---
 const CANVAS_W = 450;
 const CANVAS_H = 400;
 const PROJECT_CONFIG = {
@@ -37,33 +37,24 @@ interface ConflictScreenProps {
 }
 
 interface FloatingLabel {
-  id: string;
-  x: number;
-  y: number;
-  value: string;
-  type: 'DAMAGE' | 'HEAL' | 'STUN' | 'CRIT' | 'TRUE';
-  life: number;
-  createdAt: number;
+  id: string; x: number; y: number; value: string; type: 'DAMAGE' | 'HEAL' | 'STUN' | 'CRIT' | 'TRUE'; life: number; createdAt: number;
 }
 
 interface PendingDeploy {
-  op: Operator;
-  lane: number;
-  row: number;
-  side: 'PLAYER' | 'OPPONENT';
+  op: Operator; lane: number; row: number; side: 'PLAYER' | 'OPPONENT';
 }
 
 export default function ConflictScreen({ userProfile, onUpdateProfile, onBack, onMatchEnd }: ConflictScreenProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   
-  // -- MATCHMAKING STATE --
+  // -- MATCHMAKING & IDENTITY --
   const [matchId, setMatchId] = useState<string | null>(null);
   const [side, setSide] = useState<'PLAYER' | 'OPPONENT' | null>(null);
   const [isQueuing, setIsQueuing] = useState(false);
   const [isHost, setIsHost] = useState(false);
   const [channel, setChannel] = useState<RealtimeChannel | null>(null);
 
-  // -- SIMULATION TWIN STATE --
+  // -- GAME STATE (SIMULATION MIRROR) --
   const [isPaused, setIsPaused] = useState(false);
   const [playerHand, setPlayerHand] = useState<Operator[]>([]);
   const [playerDeck, setPlayerDeck] = useState<Operator[]>([]);
@@ -79,14 +70,12 @@ export default function ConflictScreen({ userProfile, onUpdateProfile, onBack, o
   const [playerReady, setPlayerReady] = useState(false);
   const [opponentReady, setOpponentReady] = useState(false);
   
+  // Pending deployments remain as holograms until Authorization
   const [pendingDeploys, setPendingDeploys] = useState<PendingDeploy[]>([]);
   const pendingUnitsRef = useRef<PendingDeploy[]>([]); 
 
   const [uiState, setUiState] = useState({
-    playerLP: 3,
-    opponentLP: 3,
-    playerDP: 15,
-    opponentDP: 15,
+    playerLP: 3, opponentLP: 3, playerDP: 15, opponentDP: 15,
   });
 
   const floatingLabels = useRef<FloatingLabel[]>([]);
@@ -143,10 +132,7 @@ export default function ConflictScreen({ userProfile, onUpdateProfile, onBack, o
       (w) => { if (amIHost) { matchChannel.send({ type: 'broadcast', event: 'game_over', payload: { winner: w } }); syncMatchState(matchChannel); } },
       () => {},
       (unit, reason) => { if (amIHost && reason !== 'SCORED_GOAL') { matchChannel.send({ type: 'broadcast', event: 'unit_removed', payload: { owner: unit.owner, opId: unit.id } }); } },
-      (p) => { 
-          setPhase(p); 
-          if (amIHost) { matchChannel.send({ type: 'broadcast', event: 'phase_change', payload: p }); syncMatchState(matchChannel); } 
-      },
+      (p) => { setPhase(p); if (amIHost) { matchChannel.send({ type: 'broadcast', event: 'phase_change', payload: p }); syncMatchState(matchChannel); } },
       (turn) => { if (amIHost) { matchChannel.send({ type: 'broadcast', event: 'turn_start', payload: turn }); syncMatchState(matchChannel); } },
       (lane, row, value, type) => { matchChannel.send({ type: 'broadcast', event: 'combat_event', payload: { lane, row, value, type } }); }
     );
@@ -158,11 +144,9 @@ export default function ConflictScreen({ userProfile, onUpdateProfile, onBack, o
         if (amIHost && kernelRef.current) {
           const op = ALL_ASSETS.find(a => a.id === payload.opId);
           if (op) {
-            const cost = op.dp_cost;
             const currentDP = payload.side === 'PLAYER' ? kernelRef.current.playerDP : kernelRef.current.aiDP;
-            if (currentDP >= cost) {
-                if (payload.side === 'PLAYER') kernelRef.current.playerDP -= cost;
-                else kernelRef.current.aiDP -= cost;
+            if (currentDP >= op.dp_cost) {
+                if (payload.side === 'PLAYER') kernelRef.current.playerDP -= op.dp_cost; else kernelRef.current.aiDP -= op.dp_cost;
                 pendingUnitsRef.current.push({ op, lane: payload.lane, row: payload.row, side: payload.side });
                 syncMatchState(matchChannel);
             }
@@ -173,8 +157,7 @@ export default function ConflictScreen({ userProfile, onUpdateProfile, onBack, o
           if (amIHost && kernelRef.current) {
               const currentDP = payload.side === 'PLAYER' ? kernelRef.current.playerDP : kernelRef.current.aiDP;
               if (currentDP >= 5) {
-                  if (payload.side === 'PLAYER') kernelRef.current.playerDP -= 5;
-                  else kernelRef.current.aiDP -= 5;
+                  if (payload.side === 'PLAYER') kernelRef.current.playerDP -= 5; else kernelRef.current.aiDP -= 5;
                   syncMatchState(matchChannel);
                   matchChannel.send({ type: 'broadcast', event: 'supply_confirmed', payload: { side: payload.side } });
               }
@@ -212,6 +195,11 @@ export default function ConflictScreen({ userProfile, onUpdateProfile, onBack, o
               if (op) { let cooldown = op.class === 'Specialist' ? 1 : 4; setPlayerCooldowns(prev => [...prev, { op, turnsRemaining: cooldown }]); }
           }
       })
+      .on('broadcast', { event: 'phase_change' }, ({ payload }) => { if (!amIHost) setPhase(payload); })
+      .on('broadcast', { event: 'game_over' }, ({ payload }) => {
+          const iWon = (side === 'PLAYER' && payload.winner === 'PLAYER') || (side === 'OPPONENT' && payload.winner === 'AI');
+          setWinner(iWon ? 'PLAYER' : 'OPPONENT'); onMatchEnd(iWon ? 'Win' : 'Loss');
+      })
       .on('broadcast', { event: 'ready_sync' }, ({ payload }) => { if (!amIHost) { setPlayerReady(side === 'PLAYER' ? payload.playerReady : payload.opponentReady); setOpponentReady(side === 'PLAYER' ? payload.opponentReady : payload.playerReady); } })
       .subscribe();
     setChannel(matchChannel);
@@ -239,7 +227,7 @@ export default function ConflictScreen({ userProfile, onUpdateProfile, onBack, o
     chan.send({ type: 'broadcast', event: 'match_sync', payload: state });
   };
 
-  // --- RENDERING ---
+  // --- RENDERING (SIMULATION MIRROR) ---
   const project = (l: number, r: number, z = 0) => {
     const linearProgress = Math.max(-0.1, r / 6);
     const progress = Math.pow(Math.abs(linearProgress), PROJECT_CONFIG.zFactor) * (linearProgress < 0 ? -1 : 1);
@@ -259,11 +247,11 @@ export default function ConflictScreen({ userProfile, onUpdateProfile, onBack, o
     return nearest.lane === -1 ? { lane: null, row: null } : nearest;
   };
 
-  const isHighGround = (r: number) => r === 5; // Backline is High Ground
+  const isHighGround = (r: number) => r === 5;
   const canPlaceOnTile = (opClass: string, r: number) => {
       const isRanged = ['Sniper', 'Caster', 'Medic'].includes(opClass);
-      if (r === 5) return true; // High ground allows all
-      if (r === 4) return !isRanged; // Ground allows melee only
+      if (r === 5) return true; 
+      if (r === 4) return !isRanged;
       return false;
   };
 
@@ -272,7 +260,7 @@ export default function ConflictScreen({ userProfile, onUpdateProfile, onBack, o
     const ctx = canvas.getContext('2d'); if (!ctx) return;
     ctx.clearRect(0, 0, CANVAS_W, CANVAS_H);
 
-    // Background
+    // Background Grid
     ctx.strokeStyle = 'rgba(0, 152, 217, 0.05)'; ctx.lineWidth = 0.5;
     for (let i = 0; i <= 12; i++) { const pS = project(-1.5, i * (7 / 12) - 0.5); const pE = project(3.5, i * (7 / 12) - 0.5); ctx.beginPath(); ctx.moveTo(pS.x, pS.y); ctx.lineTo(pE.x, pE.y); ctx.stroke(); }
     for (let i = 0; i <= 8; i++) { const pS = project(i * (5 / 8) - 1.5, -0.5); const pE = project(i * (5 / 8) - 1.5, 6.5); ctx.beginPath(); ctx.moveTo(pS.x, pS.y); ctx.lineTo(pE.x, pE.y); ctx.stroke(); }
@@ -294,20 +282,22 @@ export default function ConflictScreen({ userProfile, onUpdateProfile, onBack, o
         ctx.lineWidth = isSelected ? 2 : 0.8; ctx.stroke();
     }}
 
-    // Units
+    // Goal Accents
+    const aiBase = project(1, 0.2); const plBase = project(1, 5.8);
+    ctx.font = '900 10px monospace'; ctx.textAlign = 'center'; ctx.fillStyle = 'rgba(255, 59, 59, 0.9)'; ctx.shadowBlur = 5; ctx.shadowColor = '#ff3b3b'; ctx.fillText('SIGNAL HOSTILE // ELIMINATION TARGET', aiBase.x, aiBase.y - 45);
+    ctx.fillStyle = 'rgba(0, 255, 231, 0.9)'; ctx.shadowColor = '#00ffe7'; ctx.fillText('SIGNAL FRIENDLY // CORE SYNC', plBase.x, plBase.y + 45); ctx.shadowBlur = 0;
+
+    // Drawing Logic
     const drawUnit = (id: string, name: string, lane: number, row: number, owner: 'PLAYER' | 'AI', hp?: number, maxHp?: number, isPending = false) => {
         const displayRow = side === 'PLAYER' ? row : 6 - row; const displayLane = side === 'PLAYER' ? lane : 2 - lane;
         const isMe = (side === 'PLAYER' && owner === 'PLAYER') || (side === 'OPPONENT' && owner === 'AI');
         const view = isMe ? 'Back' : 'Front'; const mainColor = isMe ? '#00ffe7' : '#ff3b3b';
         const basePos = project(displayLane, displayRow); const spriteImg = spriteImages.current[`${id}_${view}`];
-        
         if (spriteImg && spriteImg.complete) {
             ctx.save(); if (isPending) ctx.globalAlpha = 0.4;
             ctx.shadowBlur = isPending ? 20 : 10; ctx.shadowColor = mainColor + '44';
             let s = 140; let yOff = 40;
-            if (name.includes('Slug')) { s = 800; yOff = 225; }
-            else if (name === 'Zima') { s = 150; yOff = 45; } // Optimized Zima scaling
-            else if (name === 'Sarkaz Mercenary') { s = 700; yOff = 197; }
+            if (name.includes('Slug')) { s = 800; yOff = 225; } else if (name === 'Zima') { s = 150; yOff = 45; } else if (name === 'Sarkaz Mercenary') { s = 700; yOff = 197; }
             ctx.drawImage(spriteImg, basePos.x - s/2, basePos.y - s + yOff, s, s);
             ctx.restore();
         }
@@ -361,13 +351,14 @@ export default function ConflictScreen({ userProfile, onUpdateProfile, onBack, o
   };
   const handleAuthorize = () => { setPlayerReady(true); channel?.send({ type: 'broadcast', event: 'authorize_ready', payload: { side } }); };
 
+  // --- UI COMPONENTS (PIXEL PERFECT MIRROR) ---
   if (isQueuing) {
     return (
       <div className="flex flex-col items-center justify-center h-full bg-black relative overflow-hidden">
         <div className="absolute inset-0 opacity-10 pointer-events-none"> <div className="absolute top-0 left-0 w-full h-px bg-rhodes-blue" /> <div className="absolute bottom-0 left-0 w-full h-px bg-rhodes-blue" /> </div>
         <motion.div initial={{ opacity: 0, scale: 0.9 }} animate={{ opacity: 1, scale: 1 }} className="flex flex-col items-center relative z-10 p-8 text-center">
           <div className="relative w-32 h-32 mb-16"> <div className="absolute inset-4 border-4 border-t-rhodes-blue border-r-transparent border-b-transparent border-l-transparent rounded-full animate-spin" /> </div>
-          <h2 className="terminal-text text-xl font-black text-rhodes-blue tracking-[0.2em] uppercase italic leading-tight">Establishing<br />Neural Link</h2>
+          <h2 className="terminal-text text-xl font-black text-rhodes-blue tracking-[0.2em] uppercase italic leading-tight text-center">Establishing<br />Neural Link</h2>
           <button onClick={onBack} className="mt-24 terminal-text text-[10px] text-white/40 hover:text-white transition-colors tracking-[0.4em] uppercase font-bold">Abort Search</button>
         </motion.div>
       </div>
@@ -376,18 +367,37 @@ export default function ConflictScreen({ userProfile, onUpdateProfile, onBack, o
 
   return (
     <div className="flex flex-col h-full bg-black relative overflow-hidden select-none" onMouseMove={handleDragMove} onTouchMove={handleDragMove} onMouseUp={handleDragEnd} onTouchEnd={handleDragEnd}>
+      {/* Header Mirror */}
       <div className="p-2 px-4 border-b border-rhodes-border flex justify-between items-center bg-black/95 backdrop-blur-md z-30 shrink-0 shadow-lg">
-        <button onClick={onBack} className="flex items-center gap-2 text-white/40 hover:text-rhodes-blue transition-colors group"> <ChevronLeft className="w-4 h-4" /> <span className="terminal-text text-[8px] font-bold uppercase">Abort</span> </button>
-        <div className="flex gap-8 items-center">
-          <div className="flex flex-col items-center gap-1"> <div className="flex items-center gap-2"> <span className="terminal-text font-black text-xs text-rhodes-blue">{uiState.playerLP}</span> </div> <span className="text-[6px] terminal-text text-white/30 uppercase font-bold">Doctor HP</span> </div>
-          <div className="px-4 py-1.5 bg-rhodes-blue/10 border border-rhodes-blue/30 rounded-full"> <span className="terminal-text text-[10px] font-black text-rhodes-blue uppercase">{phase}</span> </div>
-          <div className="flex flex-col items-center gap-1"> <div className="flex items-center gap-2"> <span className="terminal-text font-black text-xs text-red-500">{uiState.opponentLP}</span> </div> <span className="text-[6px] terminal-text text-white/30 uppercase font-bold">Target HP</span> </div>
+        <button onClick={onBack} className="flex items-center gap-2 text-white/40 hover:text-rhodes-blue transition-colors group"> 
+          <ChevronLeft className="w-4 h-4 group-hover:-translate-x-1 transition-transform" /> 
+          <span className="terminal-text text-[8px] font-bold uppercase">Abort</span> 
+        </button>
+        <div className="flex gap-4 sm:gap-8 items-center">
+          <div className="flex flex-col items-center gap-1"> 
+            <div className="flex items-center gap-2"> 
+              <div className="flex gap-0.5"> {[...Array(3)].map((_, i) => ( <div key={i} className={`h-4 w-1.5 rounded-sm skew-x-[-15deg] ${i < uiState.playerLP ? 'bg-rhodes-blue' : 'bg-white/5 border border-white/5'}`} /> ))} </div>
+              <span className="terminal-text font-black text-xs text-rhodes-blue">{uiState.playerLP}</span> 
+            </div> 
+            <span className="text-[6px] terminal-text text-white/30 uppercase font-bold">Doctor HP</span> 
+          </div>
+          <div className="px-4 py-1.5 bg-rhodes-blue/10 border border-rhodes-blue/30 rounded-full"> <span className="terminal-text text-[10px] font-black tracking-[0.2em] text-rhodes-blue uppercase">{phase}</span> </div>
+          <div className="flex flex-col items-center gap-1"> 
+            <div className="flex items-center gap-2"> 
+              <span className="terminal-text font-black text-xs text-red-500">{uiState.opponentLP}</span> 
+              <div className="flex gap-0.5"> {[...Array(3)].map((_, i) => ( <div key={i} className={`h-4 w-1.5 rounded-sm skew-x-[-15deg] ${i < uiState.opponentLP ? 'bg-red-500 shadow-[0_0_5px_#ef4444]' : 'bg-white/5 border border-white/5'}`} /> ))} </div>
+            </div> 
+            <span className="text-[6px] terminal-text text-white/30 uppercase font-bold">Target HP</span> 
+          </div>
         </div>
         <button onClick={() => setIsPaused(!isPaused)} className="p-2 rounded-full border border-white/10 text-white/40 hover:text-white"> {isPaused ? <Play className="w-4 h-4" /> : <Pause className="w-4 h-4" />} </button>
       </div>
 
+      {/* Battlefield Mirror */}
       <div className="flex-1 relative bg-black/40 overflow-hidden">
         <canvas ref={canvasRef} width={450} height={400} className="w-full h-full cursor-crosshair" />
+        
+        {/* Authorize Button */}
         <AnimatePresence>
           {phase === 'COMMAND' && (
             <motion.div initial={{ scale: 0.9, opacity: 0, y: 20 }} animate={{ scale: 1, opacity: 1, y: 0 }} exit={{ scale: 1.1, opacity: 0, y: 10 }} className="absolute bottom-6 right-6 z-40">
@@ -399,52 +409,118 @@ export default function ConflictScreen({ userProfile, onUpdateProfile, onBack, o
             </motion.div>
           )}
         </AnimatePresence>
+
+        {/* Tactical Authorization Mirror */}
         <AnimatePresence>
           {mulliganPhase && (
-            <div className="absolute inset-0 bg-black/98 z-[200] flex flex-col items-center justify-center p-4 backdrop-blur-md">
+            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="absolute inset-0 bg-black/98 z-[200] flex flex-col items-center justify-center p-4 backdrop-blur-md">
                 <h2 className="text-xl font-black terminal-text text-white tracking-widest uppercase mb-4 italic">Tactical Authorization</h2>
                 <div className="flex justify-center gap-1.5 mb-8 w-full">
                     {playerHand.map((op, idx) => (
-                        <div key={op.id} onClick={() => setMulliganSelected(prev => prev.includes(idx) ? prev.filter(i => i !== idx) : [...prev, idx])} className={`w-[18vw] max-w-[80px] aspect-[2/3] border-2 rounded-sm overflow-hidden transition-all ${mulliganSelected.includes(idx) ? 'border-red-500' : 'border-white/10'}`}>
+                        <div key={op.id} onClick={() => setMulliganSelected(prev => prev.includes(idx) ? prev.filter(i => i !== idx) : [...prev, idx])} className={`w-[18vw] max-w-[80px] aspect-[2/3] border-2 rounded-sm overflow-hidden transition-all ${mulliganSelected.includes(idx) ? 'border-red-500' : 'border-white/10 hover:border-rhodes-blue/50'}`}>
                             <img src={getCardImagePath(op)} className={`w-full h-full object-contain ${mulliganSelected.includes(idx) ? 'opacity-20 grayscale' : 'opacity-70'}`} referrerPolicy="no-referrer" />
                         </div>
                     ))}
                 </div>
-                <button onClick={() => { if (mulliganSelected.length > 0) { const newHand = [...playerHand]; const newDeck = [...playerDeck]; mulliganSelected.forEach(idx => { const card = newHand[idx]; const next = newDeck.shift(); if (next) { newHand[idx] = next; newDeck.push(card); } }); setPlayerHand(newHand); setPlayerDeck(newDeck); } setMulliganPhase(false); }} className="rhodes-button glow-blue px-10 py-2.5"> RECYCLE {mulliganSelected.length} UNITS </button>
-                <button onClick={() => setMulliganPhase(false)} className="mt-4 terminal-text text-[8px] text-white/30 hover:text-white uppercase">Skip & Start</button>
-            </div>
+                <button onClick={() => { if (mulliganSelected.length > 0) { const newHand = [...playerHand]; const newDeck = [...playerDeck]; mulliganSelected.forEach(idx => { const card = newHand[idx]; const next = newDeck.shift(); if (next) { newHand[idx] = next; newDeck.push(card); } }); setPlayerHand(newHand); setPlayerDeck(newDeck); } setMulliganPhase(false); }} className="rhodes-button glow-blue px-10 py-2.5 uppercase text-[10px] font-black"> Recycle {mulliganSelected.length} Units </button>
+                <button onClick={() => setMulliganPhase(false)} className="mt-4 terminal-text text-[8px] text-white/30 hover:text-white uppercase">Skip & Start Operation</button>
+            </motion.div>
           )}
         </AnimatePresence>
+
+        {/* Victory/Defeat Mirror */}
         <AnimatePresence>
           {winner && (
-            <div className="absolute inset-0 z-[1000] bg-black/90 flex flex-col items-center justify-center backdrop-blur-xl p-8">
-                <div className={`text-7xl font-black italic mb-8 ${winner === 'PLAYER' ? 'text-rhodes-blue' : 'text-red-600'}`}> {winner === 'PLAYER' ? 'VICTORY' : 'DEFEAT'} </div>
-                <button onClick={onBack} className="rhodes-button glow-blue px-16 py-4">Return to Terminal</button>
-            </div>
+            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="absolute inset-0 z-[1000] bg-black/90 flex flex-col items-center justify-center backdrop-blur-xl p-8 text-center">
+                <div className="relative mb-8 text-center">
+                  <div className={`text-7xl font-black italic tracking-tighter ${winner === 'PLAYER' ? 'text-rhodes-blue' : 'text-red-600'} drop-shadow-[0_0_30px_currentColor]`}> {winner === 'PLAYER' ? 'VICTORY' : 'DEFEAT'} </div>
+                  <div className="absolute -bottom-2 right-0 bg-white text-black text-[10px] font-black px-2 py-0.5 terminal-text uppercase"> Simulation {winner === 'PLAYER' ? 'Success' : 'Terminated'} </div>
+                </div>
+                <button onClick={onBack} className="rhodes-button glow-blue px-16 py-4 bg-rhodes-blue text-black font-black terminal-text text-sm uppercase">Return to Terminal</button>
+            </motion.div>
           )}
         </AnimatePresence>
       </div>
 
+      {/* Footer Mirror (PIXEL PERFECT COPY FROM SIMULATION) */}
       <div className="p-2 bg-[#050505] border-t border-rhodes-border shrink-0 z-20 shadow-2xl">
         <div className="flex justify-between items-center mb-2 px-2">
-            <div className="flex items-center gap-4">
-                <div className="flex items-center gap-2 bg-black/40 border border-white/5 px-2 py-1 rounded-sm"> <Zap className="w-3 h-3 text-orange-500" /> <span className="text-[10px] font-black text-orange-500">{uiState.playerDP}</span> </div>
-                <button onClick={() => { if (playerHand.length < 6 && uiState.playerDP >= 5 && playerDeck.length > 0) { channel?.send({ type: 'broadcast', event: 'request_supply', payload: { side } }); } }} className={`rhodes-button h-8 px-3 text-[8px] font-black uppercase ${playerHand.length < 6 && uiState.playerDP >= 5 && phase === 'COMMAND' ? 'glow-blue text-rhodes-blue' : 'opacity-30 pointer-events-none'}`}> Supply 5 </button>
+          <div className="flex items-center gap-4">
+            <div className="flex items-center gap-2 bg-black/40 border border-white/5 px-2 py-1 rounded-sm">
+                <Zap className="w-3 h-3 text-orange-500 fill-current" />
+                <span className="text-[10px] font-black terminal-text text-orange-500 leading-none">{uiState.playerDP}</span>
             </div>
-            <div className="text-[6px] text-rhodes-blue/40 terminal-text uppercase italic">Signal Deck: {playerDeck.length}</div>
+            
+            <button 
+              onClick={() => { if (playerHand.length < 6 && uiState.playerDP >= 5 && playerDeck.length > 0) { channel?.send({ type: 'broadcast', event: 'request_supply', payload: { side } }); } }}
+              disabled={playerHand.length >= 6 || uiState.playerDP < 5 || playerDeck.length === 0 || phase !== 'COMMAND'}
+              className={`rhodes-button h-8 px-3 py-0 flex flex-col items-center justify-center transition-all ${
+                playerHand.length < 6 && uiState.playerDP >= 5 && playerDeck.length > 0 && phase === 'COMMAND'
+                ? 'glow-blue border-rhodes-blue/50 text-rhodes-blue'
+                : 'border-white/5 text-white/10 opacity-50 grayscale pointer-events-none'
+              }`}
+            >
+              <div className="flex items-center gap-1.5">
+                <span className="text-[8px] font-black uppercase tracking-tighter">Supply</span>
+                <span className="text-[7px] bg-rhodes-blue/20 px-1 rounded text-rhodes-blue">5</span>
+              </div>
+            </button>
+          </div>
+          <div className="flex items-center gap-2">
+            <span className="text-[6px] text-rhodes-blue/40 terminal-text uppercase italic font-bold">Signal Deck: {playerDeck.length}</span>
+          </div>
         </div>
-        <div className="flex gap-2 overflow-x-auto pb-1 px-1 custom-scrollbar min-h-[100px]">
+
+        <div className="flex gap-2 overflow-x-auto pb-1 px-1 scrollbar-hide min-h-[100px]">
           {playerHand.map((op, idx) => (
-            <div key={idx} onMouseDown={(e) => handleDragStart(op, idx, e)} className={`w-16 h-24 border rounded-sm relative overflow-hidden shrink-0 transition-all ${uiState.playerDP >= op.dp_cost && phase === 'COMMAND' ? 'border-rhodes-blue/40 bg-rhodes-blue/5' : 'border-white/5 opacity-40'} ${draggingOp?.index === idx ? 'opacity-0' : ''}`}>
-                <img src={getCardImagePath(op)} className="w-full h-full object-contain opacity-70" referrerPolicy="no-referrer" />
-                <div className="absolute top-0.5 right-0.5 bg-black/80 px-1 py-0.5 rounded-sm"> <span className="text-[8px] font-black text-rhodes-blue">{op.dp_cost}</span> </div>
-                <div className={`absolute bottom-0 left-0 right-0 h-0.5 ${uiState.playerDP >= op.dp_cost ? 'bg-rhodes-blue' : 'bg-white/10'}`} />
+            <div key={`${op.id}-${idx}`} className="flex flex-col gap-1 shrink-0">
+              <div
+                onMouseDown={(e) => handleDragStart(op, idx, e)}
+                onTouchStart={(e) => handleDragStart(op, idx, e)}
+                className={`w-16 h-24 border rounded-sm relative overflow-hidden group transition-all cursor-grab active:cursor-grabbing ${
+                  uiState.playerDP >= op.dp_cost && phase === 'COMMAND'
+                    ? 'border-rhodes-blue/40 bg-rhodes-blue/5 shadow-inner'
+                    : 'border-white/5 bg-white/5 opacity-50 grayscale'
+                } ${draggingOp?.index === idx ? 'opacity-0 scale-95' : ''}`}
+              >
+                <img src={getCardImagePath(op)} className="w-full h-full object-contain opacity-70 group-hover:opacity-100 transition-opacity" referrerPolicy="no-referrer" />
+                <div className="absolute top-0.5 right-0.5 bg-black/80 px-1 py-0.5 rounded-sm border border-rhodes-blue/20 z-20">
+                  <span className="text-[8px] font-black terminal-text text-rhodes-blue">{op.dp_cost}</span>
+                </div>
+                <div className={`absolute bottom-0 left-0 right-0 h-0.5 ${uiState.playerDP >= op.dp_cost ? 'bg-rhodes-blue shadow-[0_0_5px_#0098d9]' : 'bg-white/10'}`} />
+              </div>
             </div>
           ))}
-          {playerCooldowns.map((c, i) => ( <div key={i} className="w-16 h-24 border border-white/5 bg-black/80 rounded-sm relative opacity-60 flex flex-col items-center justify-center shrink-0"> <RotateCcw className="w-4 h-4 text-white/10 animate-spin-slow mb-1" /> <span className="text-[8px] font-black text-rhodes-blue">{c.turnsRemaining}T</span> </div> ))}
+
+          {/* Cooldown Mirror */}
+          {playerCooldowns.map((c, i) => (
+            <div key={`cooldown-${i}`} className="flex flex-col gap-1 shrink-0">
+              <div className="w-16 h-24 border border-white/5 bg-black/80 rounded-sm relative overflow-hidden group opacity-60">
+                 <img src={getCardImagePath(c.op)} className="w-full h-full object-contain grayscale brightness-50 opacity-40" referrerPolicy="no-referrer" />
+                 <div className="absolute inset-0 flex flex-col items-center justify-center gap-1">
+                    <RotateCcw className="w-4 h-4 text-white/20 animate-spin-slow" />
+                    <div className="bg-rhodes-blue/20 px-2 py-0.5 rounded-full border border-rhodes-blue/40">
+                       <span className="text-[10px] font-black terminal-text text-rhodes-blue">{c.turnsRemaining}T</span>
+                    </div>
+                 </div>
+                 <div className="absolute inset-x-0 bottom-0 bg-black/90 p-1 border-t border-white/5">
+                    <p className="text-[5px] text-white/40 terminal-text text-center font-bold uppercase tracking-tighter">RECOVERING</p>
+                 </div>
+              </div>
+            </div>
+          ))}
+
+          {/* Empty Slots Mirror */}
+          {Array.from({ length: Math.max(0, 6 - playerHand.length - playerCooldowns.length) }).map((_, i) => (
+            <div key={`empty-${i}`} className="w-16 h-24 border border-dashed border-white/5 rounded-sm shrink-0 flex items-center justify-center bg-white/5 opacity-10">
+              <RotateCcw className="w-3 h-3 text-white/50" />
+            </div>
+          ))}
         </div>
       </div>
-      {draggingOp && ( <div className="fixed pointer-events-none z-[1000] w-16 h-24 border border-rhodes-blue bg-rhodes-blue/20 rounded overflow-hidden shadow-2xl" style={{ left: dragPos.x - 32, top: dragPos.y - 48, transform: 'scale(1.1)' }}> <img src={getCardImagePath(draggingOp.op)} className="w-full h-full object-contain" referrerPolicy="no-referrer" /> </div> )}
+
+      {/* Dragging Ghost Mirror */}
+      {draggingOp && ( <div className="fixed pointer-events-none z-[1000] w-16 h-24 border border-rhodes-blue bg-rhodes-blue/20 rounded overflow-hidden shadow-2xl" style={{ left: dragPos.x - 32, top: dragPos.y - 48, transform: 'scale(1.1)' }}> <img src={getCardImagePath(draggingOp.op)} className="w-full h-full object-contain opacity-90" referrerPolicy="no-referrer" /> </div> )}
     </div>
   );
 }
