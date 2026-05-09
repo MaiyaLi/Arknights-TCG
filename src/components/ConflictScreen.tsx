@@ -63,11 +63,10 @@ export default function ConflictScreen({ userProfile, onUpdateProfile, onBack, o
   const [isHost, setIsHost] = useState(false);
   const [channel, setChannel] = useState<RealtimeChannel | null>(null);
 
-  // -- SIMULATION TWIN STATE (PIXEL PERFECT COPY) --
+  // -- SIMULATION TWIN STATE --
   const [isPaused, setIsPaused] = useState(false);
   const [countdown, setCountdown] = useState(0);
   const [playerHand, setPlayerHand] = useState<Operator[]>([]);
-  const [playerSquad, setPlayerSquad] = useState<Operator[]>([]);
   const [playerDeck, setPlayerDeck] = useState<Operator[]>([]);
   const [mulliganPhase, setMulliganPhase] = useState(true);
   const [mulliganSelected, setMulliganSelected] = useState<number[]>([]);
@@ -77,15 +76,12 @@ export default function ConflictScreen({ userProfile, onUpdateProfile, onBack, o
   const [phase, setPhase] = useState<GamePhase>('COMMAND');
   const [draggingOp, setDraggingOp] = useState<{ op: Operator, index: number } | null>(null);
   const [dragPos, setDragPos] = useState({ x: 0, y: 0 });
-  const [selectedUnit, setSelectedUnit] = useState<GameUnit | null>(null);
-  const [selectedSlot, setSelectedSlot] = useState<{ lane: number, row: number } | null>(null);
   const [playerCooldowns, setPlayerCooldowns] = useState<{ op: Operator, turnsRemaining: number }[]>([]);
-  const [swapSourceId, setSwapSourceId] = useState<string | null>(null);
   const [playerReady, setPlayerReady] = useState(false);
   const [opponentReady, setOpponentReady] = useState(false);
   
   const [pendingDeploys, setPendingDeploys] = useState<PendingDeploy[]>([]);
-  const pendingUnitsRef = useRef<PendingDeploy[]>([]); // Ref for host to track all pending
+  const pendingUnitsRef = useRef<PendingDeploy[]>([]); 
 
   const [uiState, setUiState] = useState({
     playerLP: 3,
@@ -94,7 +90,6 @@ export default function ConflictScreen({ userProfile, onUpdateProfile, onBack, o
     opponentDP: 15,
   });
 
-  const lastDragTime = useRef<number>(0);
   const floatingLabels = useRef<FloatingLabel[]>([]);
   const spriteImages = useRef<Record<string, HTMLImageElement>>({});
   const kernelRef = useRef<BattleKernel | null>(null);
@@ -151,10 +146,7 @@ export default function ConflictScreen({ userProfile, onUpdateProfile, onBack, o
       (unit, reason) => { if (amIHost && reason !== 'SCORED_GOAL') { matchChannel.send({ type: 'broadcast', event: 'unit_removed', payload: { owner: unit.owner, opId: unit.id } }); } },
       (p) => { 
           setPhase(p); 
-          if (amIHost) { 
-              matchChannel.send({ type: 'broadcast', event: 'phase_change', payload: p }); 
-              syncMatchState(matchChannel); 
-          } 
+          if (amIHost) { matchChannel.send({ type: 'broadcast', event: 'phase_change', payload: p }); syncMatchState(matchChannel); } 
       },
       (turn) => { if (amIHost) { matchChannel.send({ type: 'broadcast', event: 'turn_start', payload: turn }); syncMatchState(matchChannel); } },
       (lane, row, value, type) => { matchChannel.send({ type: 'broadcast', event: 'combat_event', payload: { lane, row, value, type } }); }
@@ -167,12 +159,13 @@ export default function ConflictScreen({ userProfile, onUpdateProfile, onBack, o
         if (amIHost && kernelRef.current) {
           const op = ALL_ASSETS.find(a => a.id === payload.opId);
           if (op) {
+            const cost = op.dp_cost;
             const currentDP = payload.side === 'PLAYER' ? kernelRef.current.playerDP : kernelRef.current.aiDP;
-            if (currentDP >= op.dp_cost) {
-                if (payload.side === 'PLAYER') kernelRef.current.playerDP -= op.dp_cost;
-                else kernelRef.current.aiDP -= op.dp_cost;
+            if (currentDP >= cost) {
+                if (payload.side === 'PLAYER') kernelRef.current.playerDP -= cost;
+                else kernelRef.current.aiDP -= cost;
                 pendingUnitsRef.current.push({ op, lane: payload.lane, row: payload.row, side: payload.side });
-                syncMatchState(matchChannel);
+                syncMatchState(matchChannel); // Sync the new DP immediately
             }
           }
         }
@@ -201,10 +194,7 @@ export default function ConflictScreen({ userProfile, onUpdateProfile, onBack, o
         if (amIHost) { 
             if (payload.side === 'PLAYER') setPlayerReady(true); 
             else setOpponentReady(true);
-            
-            // Check if both are ready (Host + Opponent)
-            // Wait, the host might have already clicked.
-            // We need to check the state.
+            matchChannel.send({ type: 'broadcast', event: 'ready_sync', payload: { playerReady: payload.side === 'PLAYER' ? true : playerReady, opponentReady: payload.side === 'OPPONENT' ? true : opponentReady } });
         }
       })
       .on('broadcast', { event: 'start_action' }, () => {
@@ -217,7 +207,8 @@ export default function ConflictScreen({ userProfile, onUpdateProfile, onBack, o
               playerLP: payload.playerLP, opponentLP: payload.opponentLP, 
               playerDP: Math.floor(payload.playerDP), opponentDP: Math.floor(payload.opponentDP) 
           });
-          kernelRef.current.units = payload.units; kernelRef.current.playerLP = payload.playerLP; kernelRef.current.aiLP = payload.opponentLP;
+          kernelRef.current.units = payload.units; 
+          kernelRef.current.playerLP = payload.playerLP; kernelRef.current.aiLP = payload.opponentLP;
           kernelRef.current.playerDP = payload.playerDP; kernelRef.current.aiDP = payload.opponentDP; kernelRef.current.phase = payload.phase;
         }
       })
@@ -235,7 +226,10 @@ export default function ConflictScreen({ userProfile, onUpdateProfile, onBack, o
           setWinner(iWon ? 'PLAYER' : 'OPPONENT'); onMatchEnd(iWon ? 'Win' : 'Loss');
       })
       .on('broadcast', { event: 'ready_sync' }, ({ payload }) => {
-          if (!amIHost) { setPlayerReady(side === 'PLAYER' ? payload.playerReady : payload.opponentReady); setOpponentReady(side === 'PLAYER' ? payload.opponentReady : payload.playerReady); }
+          if (!amIHost) {
+              setPlayerReady(side === 'PLAYER' ? payload.playerReady : payload.opponentReady);
+              setOpponentReady(side === 'PLAYER' ? payload.opponentReady : payload.playerReady);
+          }
       })
       .subscribe();
     setChannel(matchChannel);
@@ -244,7 +238,7 @@ export default function ConflictScreen({ userProfile, onUpdateProfile, onBack, o
   // Host-only effect to trigger phase transition
   useEffect(() => {
       if (isHost && playerReady && opponentReady && phase === 'COMMAND') {
-          // Surprise Deployment Trigger
+          // Surprise Deployment Reveal
           pendingUnitsRef.current.forEach(p => {
               const kRow = p.side === 'PLAYER' ? p.row : 6 - p.row;
               const kOwner = p.side === 'PLAYER' ? 'PLAYER' : 'AI';
@@ -312,7 +306,7 @@ export default function ConflictScreen({ userProfile, onUpdateProfile, onBack, o
     ctx.font = '900 10px monospace'; ctx.textAlign = 'center'; ctx.fillStyle = 'rgba(255, 59, 59, 0.9)'; ctx.shadowBlur = 5; ctx.shadowColor = '#ff3b3b'; ctx.fillText('SIGNAL HOSTILE // ELIMINATION TARGET', aiBase.x, aiBase.y - 45);
     ctx.fillStyle = 'rgba(0, 255, 231, 0.9)'; ctx.shadowColor = '#00ffe7'; ctx.fillText('SIGNAL FRIENDLY // CORE SYNC', plBase.x, plBase.y + 45); ctx.shadowBlur = 0;
 
-    // Surprise! Draw Pending Deploys (Holograms)
+    // Surprise! Draw YOUR OWN Pending Deploys (Holograms)
     pendingDeploys.forEach(p => {
         const basePos = project(p.lane, p.row); const spriteImg = spriteImages.current[`${p.op.id}_Back`];
         if (spriteImg && spriteImg.complete) {
@@ -357,10 +351,7 @@ export default function ConflictScreen({ userProfile, onUpdateProfile, onBack, o
   const handleDragEnd = () => {
     if (draggingOp && selectedLane !== null && selectedRow !== null) {
       if (uiState.playerDP >= draggingOp.op.dp_cost) {
-          // Send request to host
           channel?.send({ type: 'broadcast', event: 'request_deploy', payload: { opId: draggingOp.op.id, lane: selectedLane, row: selectedRow, side } });
-          
-          // Local visual feedback (Pending)
           setPendingDeploys(prev => [...prev, { op: draggingOp.op, lane: selectedLane, row: selectedRow, side: side! }]);
           setPlayerHand(prev => prev.filter((_, i) => i !== draggingOp.index));
           if (playerDeck.length > 0) { setPlayerHand(prev => [...prev, playerDeck[0]]); setPlayerDeck(prev => prev.slice(1)); }
@@ -444,7 +435,7 @@ export default function ConflictScreen({ userProfile, onUpdateProfile, onBack, o
                 {playerReady ? <Loader2 className="w-4 h-4 animate-spin" /> : <Play className="w-4 h-4 fill-current" />}
                 <span className="terminal-text text-[10px] font-black tracking-[0.2em] uppercase">{playerReady ? 'Syncing...' : 'Authorize'}</span>
               </button>
-              {(opponentReady || (isHost && opponentReady)) && <div className="absolute -top-8 right-0 text-[8px] text-rhodes-blue terminal-text animate-pulse font-black uppercase">Opponent Ready</div>}
+              {opponentReady && <div className="absolute -top-8 right-0 text-[8px] text-rhodes-blue terminal-text animate-pulse font-black uppercase">Opponent Ready</div>}
             </motion.div>
           )}
         </AnimatePresence>
@@ -478,7 +469,7 @@ export default function ConflictScreen({ userProfile, onUpdateProfile, onBack, o
         <AnimatePresence>
           {winner && (
             <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="absolute inset-0 z-[1000] bg-black/90 flex flex-col items-center justify-center backdrop-blur-xl p-8 text-center">
-                <div className="relative mb-8">
+                <div className="relative mb-8 text-center">
                   <div className={`text-7xl font-black italic tracking-tighter ${winner === 'PLAYER' ? 'text-rhodes-blue' : 'text-red-600'} drop-shadow-[0_0_30px_currentColor]`}> {winner === 'PLAYER' ? 'VICTORY' : 'DEFEAT'} </div>
                   <div className="absolute -bottom-2 right-0 bg-white text-black text-[10px] font-black px-2 py-0.5 terminal-text uppercase"> Simulation {winner === 'PLAYER' ? 'Success' : 'Terminated'} </div>
                 </div>
