@@ -46,6 +46,13 @@ interface FloatingLabel {
   createdAt: number;
 }
 
+interface PendingDeploy {
+  op: Operator;
+  lane: number;
+  row: number;
+  side: 'PLAYER' | 'OPPONENT';
+}
+
 export default function ConflictScreen({ userProfile, onUpdateProfile, onBack, onMatchEnd }: ConflictScreenProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   
@@ -77,6 +84,9 @@ export default function ConflictScreen({ userProfile, onUpdateProfile, onBack, o
   const [playerReady, setPlayerReady] = useState(false);
   const [opponentReady, setOpponentReady] = useState(false);
   
+  const [pendingDeploys, setPendingDeploys] = useState<PendingDeploy[]>([]);
+  const pendingUnitsRef = useRef<PendingDeploy[]>([]); // Ref for host to track all pending
+
   const [uiState, setUiState] = useState({
     playerLP: 3,
     opponentLP: 3,
@@ -92,16 +102,12 @@ export default function ConflictScreen({ userProfile, onUpdateProfile, onBack, o
   // --- INITIALIZATION ---
   useEffect(() => {
     if (!matchId) joinLobby();
-    
     ALL_ASSETS.forEach(op => {
       ['Front', 'Back'].forEach(view => {
         const path = getSpriteImagePath(op, view as 'Front' | 'Back');
-        const img = new Image();
-        img.src = path;
-        spriteImages.current[`${op.id}_${view}`] = img;
+        const img = new Image(); img.src = path; spriteImages.current[`${op.id}_${view}`] = img;
       });
     });
-
     return () => { channel?.unsubscribe(); };
   }, []);
 
@@ -109,7 +115,6 @@ export default function ConflictScreen({ userProfile, onUpdateProfile, onBack, o
     setIsQueuing(true);
     const lobbyChannel = supabase.channel('lobby', { config: { presence: { key: userProfile.uid } } });
     let matchStarted = false;
-
     lobbyChannel.on('presence', { event: 'sync' }, () => {
         if (matchStarted) return;
         const state = lobbyChannel.presenceState();
@@ -123,11 +128,7 @@ export default function ConflictScreen({ userProfile, onUpdateProfile, onBack, o
           if (myPair) {
             matchStarted = true;
             const mId = `match_${myPair.join('_')}`;
-            setMatchId(mId);
-            setSide(myPair[0] === userProfile.uid ? 'PLAYER' : 'OPPONENT');
-            
-            // CRITICAL: Transition to match but stay in lobby presence for 5s 
-            // so the other person has time to see the same sync event!
+            setMatchId(mId); setSide(myPair[0] === userProfile.uid ? 'PLAYER' : 'OPPONENT');
             startMatch(mId, myPair[0] === userProfile.uid);
             setTimeout(() => { lobbyChannel.unsubscribe(); }, 5000);
           }
@@ -148,7 +149,13 @@ export default function ConflictScreen({ userProfile, onUpdateProfile, onBack, o
       (w) => { if (amIHost) { matchChannel.send({ type: 'broadcast', event: 'game_over', payload: { winner: w } }); syncMatchState(matchChannel); } },
       () => {},
       (unit, reason) => { if (amIHost && reason !== 'SCORED_GOAL') { matchChannel.send({ type: 'broadcast', event: 'unit_removed', payload: { owner: unit.owner, opId: unit.id } }); } },
-      (p) => { setPhase(p); if (amIHost) { matchChannel.send({ type: 'broadcast', event: 'phase_change', payload: p }); syncMatchState(matchChannel); } },
+      (p) => { 
+          setPhase(p); 
+          if (amIHost) { 
+              matchChannel.send({ type: 'broadcast', event: 'phase_change', payload: p }); 
+              syncMatchState(matchChannel); 
+          } 
+      },
       (turn) => { if (amIHost) { matchChannel.send({ type: 'broadcast', event: 'turn_start', payload: turn }); syncMatchState(matchChannel); } },
       (lane, row, value, type) => { matchChannel.send({ type: 'broadcast', event: 'combat_event', payload: { lane, row, value, type } }); }
     );
@@ -156,24 +163,60 @@ export default function ConflictScreen({ userProfile, onUpdateProfile, onBack, o
     kernelRef.current = kernel;
 
     matchChannel
-      .on('broadcast', { event: 'deploy_unit' }, ({ payload }) => {
+      .on('broadcast', { event: 'request_deploy' }, ({ payload }) => {
         if (amIHost && kernelRef.current) {
           const op = ALL_ASSETS.find(a => a.id === payload.opId);
           if (op) {
-            const kRow = payload.side === 'PLAYER' ? payload.row : 6 - payload.row;
-            const kOwner = payload.side === 'PLAYER' ? 'PLAYER' : 'AI';
-            kernelRef.current.deployUnit(op, kOwner, payload.lane, kRow);
-            syncMatchState(matchChannel);
+            const currentDP = payload.side === 'PLAYER' ? kernelRef.current.playerDP : kernelRef.current.aiDP;
+            if (currentDP >= op.dp_cost) {
+                if (payload.side === 'PLAYER') kernelRef.current.playerDP -= op.dp_cost;
+                else kernelRef.current.aiDP -= op.dp_cost;
+                pendingUnitsRef.current.push({ op, lane: payload.lane, row: payload.row, side: payload.side });
+                syncMatchState(matchChannel);
+            }
           }
         }
       })
+      .on('broadcast', { event: 'request_supply' }, ({ payload }) => {
+          if (amIHost && kernelRef.current) {
+              const currentDP = payload.side === 'PLAYER' ? kernelRef.current.playerDP : kernelRef.current.aiDP;
+              if (currentDP >= 5) {
+                  if (payload.side === 'PLAYER') kernelRef.current.playerDP -= 5;
+                  else kernelRef.current.aiDP -= 5;
+                  syncMatchState(matchChannel);
+                  matchChannel.send({ type: 'broadcast', event: 'supply_confirmed', payload: { side: payload.side } });
+              }
+          }
+      })
+      .on('broadcast', { event: 'supply_confirmed' }, ({ payload }) => {
+          if (side === payload.side) {
+              if (playerDeck.length > 0) {
+                  const next = playerDeck[0];
+                  setPlayerHand(prev => [...prev, next]);
+                  setPlayerDeck(prev => prev.slice(1));
+              }
+          }
+      })
       .on('broadcast', { event: 'authorize_ready' }, ({ payload }) => {
-        if (amIHost) { if (payload.side === 'PLAYER') setPlayerReady(true); else setOpponentReady(true); }
+        if (amIHost) { 
+            if (payload.side === 'PLAYER') setPlayerReady(true); 
+            else setOpponentReady(true);
+            
+            // Check if both are ready (Host + Opponent)
+            // Wait, the host might have already clicked.
+            // We need to check the state.
+        }
+      })
+      .on('broadcast', { event: 'start_action' }, () => {
+          setPlayerReady(false); setOpponentReady(false); setPendingDeploys([]);
       })
       .on('broadcast', { event: 'match_sync' }, ({ payload }) => {
         if (!amIHost && kernelRef.current) {
           setPhase(payload.phase);
-          setUiState({ playerLP: payload.playerLP, opponentLP: payload.opponentLP, playerDP: Math.floor(payload.playerDP), opponentDP: Math.floor(payload.opponentDP) });
+          setUiState({ 
+              playerLP: payload.playerLP, opponentLP: payload.opponentLP, 
+              playerDP: Math.floor(payload.playerDP), opponentDP: Math.floor(payload.opponentDP) 
+          });
           kernelRef.current.units = payload.units; kernelRef.current.playerLP = payload.playerLP; kernelRef.current.aiLP = payload.opponentLP;
           kernelRef.current.playerDP = payload.playerDP; kernelRef.current.aiDP = payload.opponentDP; kernelRef.current.phase = payload.phase;
         }
@@ -197,6 +240,24 @@ export default function ConflictScreen({ userProfile, onUpdateProfile, onBack, o
       .subscribe();
     setChannel(matchChannel);
   };
+
+  // Host-only effect to trigger phase transition
+  useEffect(() => {
+      if (isHost && playerReady && opponentReady && phase === 'COMMAND') {
+          // Surprise Deployment Trigger
+          pendingUnitsRef.current.forEach(p => {
+              const kRow = p.side === 'PLAYER' ? p.row : 6 - p.row;
+              const kOwner = p.side === 'PLAYER' ? 'PLAYER' : 'AI';
+              kernelRef.current?.deployUnit(p.op, kOwner, p.lane, kRow);
+          });
+          pendingUnitsRef.current = [];
+          setPlayerReady(false); setOpponentReady(false);
+          setPendingDeploys([]);
+          channel?.send({ type: 'broadcast', event: 'start_action' });
+          kernelRef.current?.executeStrategy();
+          syncMatchState(channel!);
+      }
+  }, [playerReady, opponentReady, isHost, phase]);
 
   const syncMatchState = (chan: RealtimeChannel) => {
     if (!kernelRef.current) return;
@@ -237,7 +298,7 @@ export default function ConflictScreen({ userProfile, onUpdateProfile, onBack, o
 
     // Platforms
     for (let r = 0; r < 7; r++) { for (let l = 0; l < 3; l++) {
-        const isSelected = selectedLane === l && selectedRow === r; const padSize = isSelected ? 0.43 : 0.4; const center = project(l, r);
+        const isSelected = selectedLane === l && selectedRow === r; const padSize = isSelected ? 0.43 : 0.4;
         const p0 = project(l - padSize, r - padSize); const p1 = project(l + padSize, r - padSize); const p2 = project(l + padSize, r + padSize); const p3 = project(l - padSize, r + padSize);
         const baseHeight = (r === 0 || r === 6) ? 6 : 4; const p2d = { x: p2.x, y: p2.y + baseHeight }; const p3d = { x: p3.x, y: p3.y + baseHeight };
         ctx.fillStyle = isSelected ? 'rgba(0, 255, 231, 0.4)' : 'rgba(0, 152, 217, 0.1)'; ctx.beginPath(); ctx.moveTo(p3.x, p3.y); ctx.lineTo(p2.x, p2.y); ctx.lineTo(p2d.x, p2d.y); ctx.lineTo(p3d.x, p3d.y); ctx.closePath(); ctx.fill();
@@ -246,10 +307,21 @@ export default function ConflictScreen({ userProfile, onUpdateProfile, onBack, o
         ctx.strokeStyle = isSelected ? 'rgba(0, 255, 231, 1)' : 'rgba(0, 152, 217, 0.15)'; ctx.lineWidth = isSelected ? 2 : 0.8; ctx.stroke();
     }}
 
-    // Goal Accents (Simulation Twin)
+    // Goal Accents
     const aiBase = project(1, 0.2); const plBase = project(1, 5.8);
     ctx.font = '900 10px monospace'; ctx.textAlign = 'center'; ctx.fillStyle = 'rgba(255, 59, 59, 0.9)'; ctx.shadowBlur = 5; ctx.shadowColor = '#ff3b3b'; ctx.fillText('SIGNAL HOSTILE // ELIMINATION TARGET', aiBase.x, aiBase.y - 45);
     ctx.fillStyle = 'rgba(0, 255, 231, 0.9)'; ctx.shadowColor = '#00ffe7'; ctx.fillText('SIGNAL FRIENDLY // CORE SYNC', plBase.x, plBase.y + 45); ctx.shadowBlur = 0;
+
+    // Surprise! Draw Pending Deploys (Holograms)
+    pendingDeploys.forEach(p => {
+        const basePos = project(p.lane, p.row); const spriteImg = spriteImages.current[`${p.op.id}_Back`];
+        if (spriteImg && spriteImg.complete) {
+            ctx.save(); ctx.globalAlpha = 0.4; ctx.shadowBlur = 20; ctx.shadowColor = '#00ffe7';
+            let s = 140; let yOff = 40; if (p.op.name.includes('Slug')) { s = 800; yOff = 225; }
+            ctx.drawImage(spriteImg, basePos.x - s/2, basePos.y - s + yOff, s, s);
+            ctx.restore();
+        }
+    });
 
     // Units
     kernelRef.current?.units.forEach(u => {
@@ -268,7 +340,7 @@ export default function ConflictScreen({ userProfile, onUpdateProfile, onBack, o
       ctx.save(); ctx.globalAlpha = l.life; ctx.fillStyle = l.type === 'DAMAGE' ? '#ff3b3b' : '#22c55e'; ctx.font = 'bold 12px monospace'; ctx.textAlign = 'center'; ctx.fillText(l.value, l.x, l.y - (1 - l.life) * 40); ctx.restore();
       return true;
     });
-  }, [side, selectedLane, selectedRow, draggingOp, phase]);
+  }, [side, selectedLane, selectedRow, draggingOp, phase, pendingDeploys]);
 
   useEffect(() => {
     let animId: number;
@@ -285,8 +357,13 @@ export default function ConflictScreen({ userProfile, onUpdateProfile, onBack, o
   const handleDragEnd = () => {
     if (draggingOp && selectedLane !== null && selectedRow !== null) {
       if (uiState.playerDP >= draggingOp.op.dp_cost) {
-          channel?.send({ type: 'broadcast', event: 'deploy_unit', payload: { opId: draggingOp.op.id, lane: selectedLane, row: selectedRow, side } });
-          setPlayerHand(prev => prev.filter((_, i) => i !== draggingOp.index)); if (playerDeck.length > 0) { setPlayerHand(prev => [...prev, playerDeck[0]]); setPlayerDeck(prev => prev.slice(1)); }
+          // Send request to host
+          channel?.send({ type: 'broadcast', event: 'request_deploy', payload: { opId: draggingOp.op.id, lane: selectedLane, row: selectedRow, side } });
+          
+          // Local visual feedback (Pending)
+          setPendingDeploys(prev => [...prev, { op: draggingOp.op, lane: selectedLane, row: selectedRow, side: side! }]);
+          setPlayerHand(prev => prev.filter((_, i) => i !== draggingOp.index));
+          if (playerDeck.length > 0) { setPlayerHand(prev => [...prev, playerDeck[0]]); setPlayerDeck(prev => prev.slice(1)); }
       }
     }
     setDraggingOp(null); setSelectedLane(null); setSelectedRow(null);
@@ -295,76 +372,34 @@ export default function ConflictScreen({ userProfile, onUpdateProfile, onBack, o
     const pos = project(lane, row, 10); floatingLabels.current.push({ id: Math.random().toString(36).substr(2, 9), x: pos.x + (Math.random()-0.5)*30, y: pos.y + (Math.random()-0.5)*15, value: value > 0 ? value.toString() : '', type, life: 1.0, createdAt: Date.now() });
   };
   const handleAuthorize = () => {
-    setPlayerReady(true); channel?.send({ type: 'broadcast', event: 'authorize_ready', payload: { side } });
-    if (isHost && opponentReady) { setPlayerReady(false); setOpponentReady(false); kernelRef.current?.executeStrategy(); syncMatchState(channel!); }
+    setPlayerReady(true);
+    channel?.send({ type: 'broadcast', event: 'authorize_ready', payload: { side } });
   };
 
   if (isQueuing) {
     return (
       <div className="flex flex-col items-center justify-center h-full bg-black relative overflow-hidden">
-        {/* Technical Background Accents */}
         <div className="absolute inset-0 opacity-10 pointer-events-none">
-           <div className="absolute top-0 left-0 w-full h-px bg-rhodes-blue" />
-           <div className="absolute bottom-0 left-0 w-full h-px bg-rhodes-blue" />
-           <div className="absolute top-0 left-0 w-px h-full bg-rhodes-blue" />
-           <div className="absolute top-0 right-0 w-px h-full bg-rhodes-blue" />
+           <div className="absolute top-0 left-0 w-full h-px bg-rhodes-blue" /> <div className="absolute bottom-0 left-0 w-full h-px bg-rhodes-blue" />
+           <div className="absolute top-0 left-0 w-px h-full bg-rhodes-blue" /> <div className="absolute top-0 right-0 w-px h-full bg-rhodes-blue" />
         </div>
-
-        <motion.div 
-          initial={{ opacity: 0, scale: 0.9 }}
-          animate={{ opacity: 1, scale: 1 }}
-          className="flex flex-col items-center relative z-10 p-8 text-center"
-        >
-          {/* Animated Spinner Core */}
+        <motion.div initial={{ opacity: 0, scale: 0.9 }} animate={{ opacity: 1, scale: 1 }} className="flex flex-col items-center relative z-10 p-8 text-center">
           <div className="relative w-32 h-32 mb-16">
-             <motion.div 
-               animate={{ rotate: 360 }}
-               transition={{ duration: 8, repeat: Infinity, ease: "linear" }}
-               className="absolute inset-0 border border-rhodes-blue/20 rounded-full" 
-             />
-             <motion.div 
-               animate={{ rotate: -360 }}
-               transition={{ duration: 4, repeat: Infinity, ease: "linear" }}
-               className="absolute inset-2 border-2 border-dashed border-rhodes-blue/10 rounded-full" 
-             />
+             <motion.div animate={{ rotate: 360 }} transition={{ duration: 8, repeat: Infinity, ease: "linear" }} className="absolute inset-0 border border-rhodes-blue/20 rounded-full" />
+             <motion.div animate={{ rotate: -360 }} transition={{ duration: 4, repeat: Infinity, ease: "linear" }} className="absolute inset-2 border-2 border-dashed border-rhodes-blue/10 rounded-full" />
              <div className="absolute inset-4 border-4 border-t-rhodes-blue border-r-transparent border-b-transparent border-l-transparent rounded-full animate-spin" />
-             <div className="absolute inset-0 flex items-center justify-center">
-                <div className="w-1 h-1 bg-rhodes-blue rounded-full animate-pulse shadow-[0_0_10px_#0098d9]" />
-             </div>
           </div>
-
           <div className="space-y-4 max-w-[280px]">
-            <h2 className="terminal-text text-xl font-black text-rhodes-blue tracking-[0.2em] uppercase italic leading-tight">
-              Establishing<br />Neural Link
-            </h2>
-            
-            <div className="flex items-center justify-center gap-3">
-              <div className="h-px flex-1 bg-gradient-to-r from-transparent to-rhodes-blue/30" />
-              <div className="w-1 h-1 bg-rhodes-blue rotate-45" />
-              <div className="h-px flex-1 bg-gradient-to-l from-transparent to-rhodes-blue/30" />
-            </div>
-
-            <p className="terminal-text text-[9px] text-white/30 tracking-[0.3em] uppercase animate-pulse">
-              Syncing Conflict Area Parameters...
-            </p>
+            <h2 className="terminal-text text-xl font-black text-rhodes-blue tracking-[0.2em] uppercase italic leading-tight">Establishing<br />Neural Link</h2>
+            <p className="terminal-text text-[9px] text-white/30 tracking-[0.3em] uppercase animate-pulse">Syncing Conflict Area Parameters...</p>
           </div>
-
           <div className="mt-24">
-            <button 
-              onClick={onBack} 
-              className="group flex flex-col items-center gap-2"
-            >
-              <span className="terminal-text text-[10px] text-white/40 group-hover:text-white transition-colors tracking-[0.4em] uppercase font-bold">
-                Abort Search
-              </span>
+            <button onClick={onBack} className="group flex flex-col items-center gap-2">
+              <span className="terminal-text text-[10px] text-white/40 group-hover:text-white transition-colors tracking-[0.4em] uppercase font-bold">Abort Search</span>
               <div className="w-8 h-0.5 bg-white/10 group-hover:w-16 group-hover:bg-rhodes-blue transition-all duration-300" />
             </button>
           </div>
         </motion.div>
-
-        {/* Technical Corner Accents */}
-        <div className="absolute top-4 left-4 text-[8px] terminal-text text-rhodes-blue/20 uppercase font-black tracking-widest">PRTS // SYS.LINK</div>
-        <div className="absolute bottom-4 right-4 text-[8px] terminal-text text-rhodes-blue/20 uppercase font-black tracking-widest">RHODES.ISLAND.TERM</div>
       </div>
     );
   }
@@ -409,7 +444,7 @@ export default function ConflictScreen({ userProfile, onUpdateProfile, onBack, o
                 {playerReady ? <Loader2 className="w-4 h-4 animate-spin" /> : <Play className="w-4 h-4 fill-current" />}
                 <span className="terminal-text text-[10px] font-black tracking-[0.2em] uppercase">{playerReady ? 'Syncing...' : 'Authorize'}</span>
               </button>
-              {opponentReady && <div className="absolute -top-8 right-0 text-[8px] text-rhodes-blue terminal-text animate-pulse font-black uppercase">Opponent Ready</div>}
+              {(opponentReady || (isHost && opponentReady)) && <div className="absolute -top-8 right-0 text-[8px] text-rhodes-blue terminal-text animate-pulse font-black uppercase">Opponent Ready</div>}
             </motion.div>
           )}
         </AnimatePresence>
@@ -461,7 +496,7 @@ export default function ConflictScreen({ userProfile, onUpdateProfile, onBack, o
                 <div className="flex items-center gap-2 bg-black/40 border border-white/5 px-2 py-1 rounded-sm">
                     <Zap className="w-3 h-3 text-orange-500" /> <span className="text-[10px] font-black terminal-text text-orange-500 leading-none">{uiState.playerDP}</span>
                 </div>
-                <button onClick={() => { if (playerHand.length < 6 && uiState.playerDP >= 5 && playerDeck.length > 0) { const next = playerDeck[0]; setPlayerHand([...playerHand, next]); setPlayerDeck(playerDeck.slice(1)); if (isHost && kernelRef.current) { kernelRef.current.playerDP -= 5; syncMatchState(channel!); } } }} className={`rhodes-button h-8 px-3 text-[8px] font-black uppercase ${playerHand.length < 6 && uiState.playerDP >= 5 && phase === 'COMMAND' ? 'glow-blue text-rhodes-blue' : 'opacity-30 grayscale pointer-events-none'}`}>
+                <button onClick={() => { if (playerHand.length < 6 && uiState.playerDP >= 5 && playerDeck.length > 0) { channel?.send({ type: 'broadcast', event: 'request_supply', payload: { side } }); } }} className={`rhodes-button h-8 px-3 text-[8px] font-black uppercase ${playerHand.length < 6 && uiState.playerDP >= 5 && phase === 'COMMAND' ? 'glow-blue text-rhodes-blue' : 'opacity-30 grayscale pointer-events-none'}`}>
                   Supply 5
                 </button>
             </div>
