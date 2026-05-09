@@ -293,11 +293,70 @@ export default function ConflictScreen({ userProfile, onUpdateProfile, onBack, o
 
   if (isQueuing) {
     return (
-      <div className="flex flex-col items-center justify-center h-full bg-black/90 backdrop-blur-xl">
-        <div className="relative w-24 h-24 mb-12"> <div className="absolute inset-0 border-4 border-rhodes-blue/20 rounded-full" /> <div className="absolute inset-0 border-4 border-t-rhodes-blue rounded-full animate-spin" /> </div>
-        <h2 className="terminal-text text-2xl font-black text-rhodes-blue tracking-[0.3em] uppercase italic mb-2">Establishing Neural Link</h2>
-        <p className="terminal-text text-[10px] text-white/30 tracking-widest uppercase mb-12">Syncing Conflict Area Parameters...</p>
-        <button onClick={onBack} className="text-[10px] text-white/40 hover:text-white terminal-text uppercase border-b border-white/10 pb-1">Abort Search</button>
+      <div className="flex flex-col items-center justify-center h-full bg-black relative overflow-hidden">
+        {/* Technical Background Accents */}
+        <div className="absolute inset-0 opacity-10 pointer-events-none">
+           <div className="absolute top-0 left-0 w-full h-px bg-rhodes-blue" />
+           <div className="absolute bottom-0 left-0 w-full h-px bg-rhodes-blue" />
+           <div className="absolute top-0 left-0 w-px h-full bg-rhodes-blue" />
+           <div className="absolute top-0 right-0 w-px h-full bg-rhodes-blue" />
+        </div>
+
+        <motion.div 
+          initial={{ opacity: 0, scale: 0.9 }}
+          animate={{ opacity: 1, scale: 1 }}
+          className="flex flex-col items-center relative z-10 p-8 text-center"
+        >
+          {/* Animated Spinner Core */}
+          <div className="relative w-32 h-32 mb-16">
+             <motion.div 
+               animate={{ rotate: 360 }}
+               transition={{ duration: 8, repeat: Infinity, ease: "linear" }}
+               className="absolute inset-0 border border-rhodes-blue/20 rounded-full" 
+             />
+             <motion.div 
+               animate={{ rotate: -360 }}
+               transition={{ duration: 4, repeat: Infinity, ease: "linear" }}
+               className="absolute inset-2 border-2 border-dashed border-rhodes-blue/10 rounded-full" 
+             />
+             <div className="absolute inset-4 border-4 border-t-rhodes-blue border-r-transparent border-b-transparent border-l-transparent rounded-full animate-spin" />
+             <div className="absolute inset-0 flex items-center justify-center">
+                <div className="w-1 h-1 bg-rhodes-blue rounded-full animate-pulse shadow-[0_0_10px_#0098d9]" />
+             </div>
+          </div>
+
+          <div className="space-y-4 max-w-[280px]">
+            <h2 className="terminal-text text-xl font-black text-rhodes-blue tracking-[0.2em] uppercase italic leading-tight">
+              Establishing<br />Neural Link
+            </h2>
+            
+            <div className="flex items-center justify-center gap-3">
+              <div className="h-px flex-1 bg-gradient-to-r from-transparent to-rhodes-blue/30" />
+              <div className="w-1 h-1 bg-rhodes-blue rotate-45" />
+              <div className="h-px flex-1 bg-gradient-to-l from-transparent to-rhodes-blue/30" />
+            </div>
+
+            <p className="terminal-text text-[9px] text-white/30 tracking-[0.3em] uppercase animate-pulse">
+              Syncing Conflict Area Parameters...
+            </p>
+          </div>
+
+          <div className="mt-24">
+            <button 
+              onClick={onBack} 
+              className="group flex flex-col items-center gap-2"
+            >
+              <span className="terminal-text text-[10px] text-white/40 group-hover:text-white transition-colors tracking-[0.4em] uppercase font-bold">
+                Abort Search
+              </span>
+              <div className="w-8 h-0.5 bg-white/10 group-hover:w-16 group-hover:bg-rhodes-blue transition-all duration-300" />
+            </button>
+          </div>
+        </motion.div>
+
+        {/* Technical Corner Accents */}
+        <div className="absolute top-4 left-4 text-[8px] terminal-text text-rhodes-blue/20 uppercase font-black tracking-widest">PRTS // SYS.LINK</div>
+        <div className="absolute bottom-4 right-4 text-[8px] terminal-text text-rhodes-blue/20 uppercase font-black tracking-widest">RHODES.ISLAND.TERM</div>
       </div>
     );
   }
