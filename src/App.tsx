@@ -97,6 +97,7 @@ export default function App() {
           // alert("DEBUG: Auth State - User found: " + user.uid);
           
           // SYNC LOGIC: Check cloud vs local
+          let activeProfile: UserProfile;
           let cloudProfile: UserProfile | null = null;
           try {
             // Check Supabase first as it's the primary DB now
