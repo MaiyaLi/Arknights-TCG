@@ -114,10 +114,9 @@ export default function OperatorHub({ userProfile, onUpdateProfile, onBack }: Op
   const [error, setError] = useState<string | null>(null);
 
   const ownedSpecialOperators = useMemo(() => {
-    // For testing: Show all operators that have a personality defined
     return ALL_ASSETS
-      .filter(op => !!OPERATOR_PERSONALITIES[op.id]);
-  }, []);
+      .filter(op => userProfile.collection.includes(op.id) && !!OPERATOR_PERSONALITIES[op.id]);
+  }, [userProfile.collection]);
 
   const currentMessages = selectedOpId ? messages[selectedOpId] || [] : [];
 
@@ -332,13 +331,7 @@ Constraints:
                      placeholder="Type message..."
                      className="flex-1 bg-black/40 border border-white/10 rounded px-3 py-2 text-[10px] terminal-text text-white focus:outline-none focus:border-rhodes-blue/50 transition-all"
                    />
-                   <button 
-                     onClick={() => setUserInput("Hello, Operator. How is your status today?")}
-                     className="p-2 rounded bg-white/5 text-white/40 hover:text-white transition-all flex items-center justify-center"
-                     title="Inject Test Prompt"
-                   >
-                     <Sparkles className="w-4 h-4" />
-                   </button>
+
                    <button 
                      onClick={handleSendMessage}
                      disabled={!userInput.trim() || isTyping}
