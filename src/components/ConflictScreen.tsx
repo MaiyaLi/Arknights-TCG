@@ -277,7 +277,7 @@ export default function ConflictScreen({ userProfile, onUpdateProfile, onBack, o
             ctx.shadowBlur = isPending ? 20 : 10; ctx.shadowColor = mainColor + '44';
             let s = 140; let yOff = 40; 
             if (id.toLowerCase().includes('slug')) { s = 800; yOff = 225; } 
-            else if (id.toLowerCase().includes('zima') || name.toLowerCase().includes('zima')) { s = 300; yOff = 85; } 
+            else if (id.toLowerCase().includes('zima') || name.toLowerCase().includes('zima')) { s = 240; yOff = 145; } 
             else if (id.toLowerCase().includes('sarkaz')) { s = 700; yOff = 197; }
             ctx.drawImage(spriteImg, basePos.x - s/2, basePos.y - s + yOff, s, s); ctx.restore();
         }

@@ -531,8 +531,8 @@ export default function SimulationScreen({ userProfile, onUpdateProfile, onBack,
             s = 800;
             yOff = 225;
         } else if (unit.id.toLowerCase().includes('zima') || unit.name.toLowerCase().includes('zima')) {
-            s = 300;
-            yOff = 85;
+            s = 240;
+            yOff = 145;
         } else if (unit.name === 'Sarkaz Mercenary') {
             s = 700;
             yOff = 197;
