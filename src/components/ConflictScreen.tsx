@@ -97,10 +97,10 @@ export default function ConflictScreen({ userProfile, onUpdateProfile, onBack, o
           if (myPair) {
             matchStarted = true;
             const mId = `match_${myPair.join('_')}`;
-            setMatchId(mId);
-            const myActualSide = myPair[0] === userProfile.uid ? 'PLAYER' : 'OPPONENT';
-            setSide(myActualSide);
-            startMatch(mId, myActualSide === 'PLAYER', myActualSide);
+            const amIHostNow = myPair[0] === userProfile.uid;
+            const myActualSide = amIHostNow ? 'PLAYER' : 'OPPONENT';
+            setMatchId(mId); setSide(myActualSide);
+            startMatch(mId, amIHostNow, myActualSide);
             setTimeout(() => { lobbyChannel.unsubscribe(); }, 5000);
           }
         }
@@ -120,11 +120,11 @@ export default function ConflictScreen({ userProfile, onUpdateProfile, onBack, o
     setChannel(matchChannel);
 
     const kernel = new BattleKernel(
-      (w) => { if (amIHost) { matchChannel.send({ type: 'broadcast', event: 'game_over', payload: { winner: w } }); syncMatchState(); } },
+      (w) => { if (amIHost) { matchChannel.send({ type: 'broadcast', event: 'game_over', payload: { winner: w } }); syncMatchStateInternal(kernel, matchChannel, mySide); } },
       () => {},
       (unit, reason) => { if (amIHost && reason !== 'SCORED_GOAL') { matchChannel.send({ type: 'broadcast', event: 'unit_removed', payload: { owner: unit.owner, opId: unit.id } }); } },
-      (p) => { setPhase(p); if (amIHost) { matchChannel.send({ type: 'broadcast', event: 'phase_change', payload: p }); syncMatchState(); } },
-      (turn) => { if (amIHost) { matchChannel.send({ type: 'broadcast', event: 'turn_start', payload: turn }); syncMatchState(); } },
+      (p) => { setPhase(p); if (amIHost) { matchChannel.send({ type: 'broadcast', event: 'phase_change', payload: p }); syncMatchStateInternal(kernel, matchChannel, mySide); } },
+      (turn) => { if (amIHost) { matchChannel.send({ type: 'broadcast', event: 'turn_start', payload: turn }); syncMatchStateInternal(kernel, matchChannel, mySide); } },
       (lane, row, value, type) => { matchChannel.send({ type: 'broadcast', event: 'combat_event', payload: { lane, row, value, type } }); }
     );
     if (amIHost) kernel.start();
@@ -139,21 +139,21 @@ export default function ConflictScreen({ userProfile, onUpdateProfile, onBack, o
             const currentDP = isPl ? kernelRef.current.playerDP : kernelRef.current.aiDP;
             if (currentDP >= op.dp_cost) {
                 if (isPl) kernelRef.current.playerDP -= op.dp_cost; else kernelRef.current.aiDP -= op.dp_cost;
-                // Position flip for kernel: Guest's row 5 is kernel row 1
                 const kRow = isPl ? payload.row : 6 - payload.row;
                 const kLane = isPl ? payload.lane : 2 - payload.lane;
                 pendingUnitsRef.current.push({ op, lane: kLane, row: kRow, side: payload.side });
-                syncMatchState(); 
+                syncMatchStateInternal(kernelRef.current, matchChannel, mySide); 
             }
           }
         }
       })
       .on('broadcast', { event: 'request_supply' }, ({ payload }) => {
           if (amIHost && kernelRef.current) {
-              const currentDP = payload.side === 'PLAYER' ? kernelRef.current.playerDP : kernelRef.current.aiDP;
+              const isPl = payload.side === 'PLAYER';
+              const currentDP = isPl ? kernelRef.current.playerDP : kernelRef.current.aiDP;
               if (currentDP >= 5) {
-                  if (payload.side === 'PLAYER') kernelRef.current.playerDP -= 5; else kernelRef.current.aiDP -= 5;
-                  syncMatchState();
+                  if (isPl) kernelRef.current.playerDP -= 5; else kernelRef.current.aiDP -= 5;
+                  syncMatchStateInternal(kernelRef.current, matchChannel, mySide);
                   matchChannel.send({ type: 'broadcast', event: 'supply_confirmed', payload: { side: payload.side } });
               }
           }
@@ -191,7 +191,7 @@ export default function ConflictScreen({ userProfile, onUpdateProfile, onBack, o
           kernelRef.current.playerDP = payload.playerDP; kernelRef.current.aiDP = payload.opponentDP; kernelRef.current.phase = payload.phase;
         }
       })
-      .on('broadcast', { event: 'combat_event' }, ({ payload }) => { handleCombatEvent(payload.lane, payload.row, payload.value, payload.type); })
+      .on('broadcast', { event: 'combat_event' }, ({ payload }) => { handleCombatEvent(payload.lane, payload.row, payload.value, payload.type, mySide); })
       .on('broadcast', { event: 'unit_removed' }, ({ payload }) => {
           const isMe = (mySide === 'PLAYER' && payload.owner === 'PLAYER') || (mySide === 'OPPONENT' && payload.owner === 'AI');
           if (isMe) {
@@ -211,36 +211,32 @@ export default function ConflictScreen({ userProfile, onUpdateProfile, onBack, o
       });
   };
 
+  const syncMatchStateInternal = (kernel: BattleKernel, chan: RealtimeChannel, mySide: string) => {
+    const state = { units: kernel.units, phase: kernel.phase, turn: kernel.turnCount, playerLP: kernel.playerLP, opponentLP: kernel.aiLP, playerDP: kernel.playerDP, opponentDP: kernel.aiDP };
+    const isPl = mySide === 'PLAYER';
+    const myDPValue = isPl ? state.playerDP : state.opponentDP;
+    const oppDPValue = isPl ? state.opponentDP : state.playerDP;
+    const myLPValue = isPl ? state.playerLP : state.opponentLP;
+    const oppLPValue = isPl ? state.opponentLP : state.playerLP;
+    setUiState({ playerLP: myLPValue, opponentLP: oppLPValue, playerDP: Math.floor(myDPValue), opponentDP: Math.floor(oppDPValue) });
+    chan.send({ type: 'broadcast', event: 'match_sync', payload: state });
+  };
+
   useEffect(() => {
       if (isHost && playerReady && opponentReady && phase === 'COMMAND') {
-          pendingUnitsRef.current.forEach(p => {
-              kernelRef.current?.deployUnit(p.op, p.side === 'PLAYER' ? 'PLAYER' : 'AI', p.lane, p.row);
-          });
+          pendingUnitsRef.current.forEach(p => { kernelRef.current?.deployUnit(p.op, p.side === 'PLAYER' ? 'PLAYER' : 'AI', p.lane, p.row); });
           pendingUnitsRef.current = [];
           setPlayerReady(false); setOpponentReady(false); setPendingDeploys([]);
           channelRef.current?.send({ type: 'broadcast', event: 'start_action' });
           kernelRef.current?.executeStrategy();
-          syncMatchState();
+          if (kernelRef.current && channelRef.current && side) syncMatchStateInternal(kernelRef.current, channelRef.current, side);
       } else if (isHost) {
           channelRef.current?.send({ type: 'broadcast', event: 'ready_sync', payload: { playerReady, opponentReady } });
       }
   }, [playerReady, opponentReady, isHost, phase]);
 
-  const syncMatchState = () => {
-    if (!kernelRef.current || !channelRef.current) return;
-    const state = { units: kernelRef.current.units, phase: kernelRef.current.phase, turn: kernelRef.current.turnCount, playerLP: kernelRef.current.playerLP, opponentLP: kernelRef.current.aiLP, playerDP: kernelRef.current.playerDP, opponentDP: kernelRef.current.aiDP };
-    const isPl = side === 'PLAYER';
-    const myDP = isPl ? state.playerDP : state.opponentDP;
-    const oppDP = isPl ? state.opponentDP : state.playerDP;
-    const myLP = isPl ? state.playerLP : state.opponentLP;
-    const oppLP = isPl ? state.opponentLP : state.playerLP;
-    setUiState({ playerLP: myLP, opponentLP: oppLP, playerDP: Math.floor(myDP), opponentDP: Math.floor(oppDP) });
-    channelRef.current.send({ type: 'broadcast', event: 'match_sync', payload: state });
-  };
-
-  // --- RENDERING (COORDINATE FLIPPED) ---
+  // --- RENDERING ---
   const project = (l: number, r: number, z = 0) => {
-    // VISUAL COORDINATES: r=0 is top, r=6 is bottom for EVERYONE.
     const linearProgress = Math.max(-0.1, r / 6);
     const progress = Math.pow(Math.abs(linearProgress), PROJECT_CONFIG.zFactor) * (linearProgress < 0 ? -1 : 1);
     const currY = PROJECT_CONFIG.topY + progress * (PROJECT_CONFIG.bottomY - PROJECT_CONFIG.topY);
@@ -259,7 +255,6 @@ export default function ConflictScreen({ userProfile, onUpdateProfile, onBack, o
     return nearest.lane === -1 ? { lane: null, row: null } : nearest;
   };
 
-  const isHighGround = (r: number) => r === 5;
   const canPlaceOnTile = (opClass: string, r: number) => {
       const isRanged = ['Sniper', 'Caster', 'Medic'].includes(opClass);
       if (r === 5) return true; 
@@ -277,9 +272,9 @@ export default function ConflictScreen({ userProfile, onUpdateProfile, onBack, o
     for (let i = 0; i <= 12; i++) { const pS = project(-1.5, i * (7 / 12) - 0.5); const pE = project(3.5, i * (7 / 12) - 0.5); ctx.beginPath(); ctx.moveTo(pS.x, pS.y); ctx.lineTo(pE.x, pE.y); ctx.stroke(); }
     for (let i = 0; i <= 8; i++) { const pS = project(i * (5 / 8) - 1.5, -0.5); const pE = project(i * (5 / 8) - 1.5, 6.5); ctx.beginPath(); ctx.moveTo(pS.x, pS.y); ctx.lineTo(pE.x, pE.y); ctx.stroke(); }
 
-    // Platforms (Visual Only)
+    // Platforms
     for (let r = 0; r < 7; r++) { for (let l = 0; l < 3; l++) {
-        const isSelected = selectedLane === l && selectedRow === r; const isPlat = isHighGround(r);
+        const isSelected = selectedLane === l && selectedRow === r; const isPlat = r === 5;
         const padSize = isSelected ? 0.43 : 0.4;
         const p0 = project(l - padSize, r - padSize); const p1 = project(l + padSize, r - padSize); const p2 = project(l + padSize, r + padSize); const p3 = project(l - padSize, r + padSize);
         const baseHeight = isPlat ? 12 : ((r === 0 || r === 6) ? 6 : 4);
@@ -293,25 +288,17 @@ export default function ConflictScreen({ userProfile, onUpdateProfile, onBack, o
 
     const drawUnit = (id: string, name: string, lane: number, row: number, owner: 'PLAYER' | 'AI', hp?: number, maxHp?: number, isPending = false) => {
         const isPl = side === 'PLAYER';
-        // KERNEL Row 6 is Player side. KERNEL Row 0 is AI side.
-        // VISUALLY: We want OUR side at the bottom (Row 5, 6) and ENEMY at top (Row 0, 1).
-        let displayRow = row; 
-        let displayLane = lane;
-        if (isPl) {
-            // Host: Kernel 6 is screen 6.
-            displayRow = row; displayLane = lane;
-        } else {
-            // Guest: Kernel 0 is screen 6.
-            displayRow = 6 - row; displayLane = 2 - lane;
-        }
-
+        let dRow = isPl ? row : 6 - row; let dLane = isPl ? lane : 2 - lane;
         const isMe = (isPl && owner === 'PLAYER') || (!isPl && owner === 'AI');
         const view = isMe ? 'Back' : 'Front'; const mainColor = isMe ? '#00ffe7' : '#ff3b3b';
-        const basePos = project(displayLane, displayRow); const spriteImg = spriteImages.current[`${id}_${view}`];
+        const basePos = project(dLane, dRow); const spriteImg = spriteImages.current[`${id}_${view}`];
         if (spriteImg && spriteImg.complete) {
             ctx.save(); if (isPending) ctx.globalAlpha = 0.4;
             ctx.shadowBlur = isPending ? 20 : 10; ctx.shadowColor = mainColor + '44';
-            let s = 140; let yOff = 40; if (name.includes('Slug')) { s = 800; yOff = 225; } else if (name === 'Zima') { s = 150; yOff = 45; } else if (name === 'Sarkaz Mercenary') { s = 700; yOff = 197; }
+            let s = 140; let yOff = 40; 
+            if (name.includes('Slug')) { s = 800; yOff = 225; } 
+            else if (name === 'Zima') { s = 180; yOff = 55; } // CORRECTED ZIMA SCALE
+            else if (name === 'Sarkaz Mercenary') { s = 700; yOff = 197; }
             ctx.drawImage(spriteImg, basePos.x - s/2, basePos.y - s + yOff, s, s); ctx.restore();
         }
         if (!isPending && hp !== undefined && maxHp !== undefined) {
@@ -319,12 +306,11 @@ export default function ConflictScreen({ userProfile, onUpdateProfile, onBack, o
         }
     };
 
-    // Pending deploys are already in Screen Coordinates for the local player
     pendingDeploys.forEach(p => {
         const basePos = project(p.lane, p.row); const spriteImg = spriteImages.current[`${p.op.id}_Back`];
         if (spriteImg && spriteImg.complete) {
             ctx.save(); ctx.globalAlpha = 0.4; ctx.shadowBlur = 20; ctx.shadowColor = '#00ffe744';
-            let s = 140; let yOff = 40; if (p.op.name === 'Zima') s = 150;
+            let s = 140; let yOff = 40; if (p.op.name === 'Zima') { s = 180; yOff = 55; }
             ctx.drawImage(spriteImg, basePos.x - s/2, basePos.y - s + yOff, s, s); ctx.restore();
         }
     });
@@ -340,11 +326,16 @@ export default function ConflictScreen({ userProfile, onUpdateProfile, onBack, o
 
   useEffect(() => {
     let animId: number;
-    const loop = () => { if (isHost && kernelRef.current && phase === 'ACTION' && !isPaused) { kernelRef.current.tick(); syncMatchState(); } render(); animId = requestAnimationFrame(loop); };
+    const loop = () => { if (isHost && kernelRef.current && phase === 'ACTION' && !isPaused) { kernelRef.current.tick(); if (channelRef.current && side) syncMatchStateInternal(kernelRef.current, channelRef.current, side); } render(); animId = requestAnimationFrame(loop); };
     loop(); return () => cancelAnimationFrame(animId);
   }, [phase, isHost, isPaused, side, selectedLane, selectedRow, draggingOp, render]);
 
-  // --- HANDLERS ---
+  const handleCombatEvent = (lane: number, row: number, value: number, type: any, mySide: string) => {
+    const isPl = mySide === 'PLAYER'; const dRow = isPl ? row : 6 - row; const dLane = isPl ? lane : 2 - lane;
+    const pos = project(dLane, dRow, 10); 
+    floatingLabels.current.push({ id: Math.random().toString(36).substr(2, 9), x: pos.x + (Math.random()-0.5)*30, y: pos.y + (Math.random()-0.5)*15, value: value > 0 ? value.toString() : '', type, life: 1.0, createdAt: Date.now() });
+  };
+
   const handleDragStart = (op: Operator, index: number, e: any) => { if (phase !== 'COMMAND') return; setDraggingOp({ op, index }); setDragPos({ x: e.clientX || e.touches[0].clientX, y: e.clientY || e.touches[0].clientY }); };
   const handleDragMove = (e: any) => {
     if (!draggingOp) return; const x = e.clientX || e.touches[0].clientX; const y = e.clientY || e.touches[0].clientY; setDragPos({ x, y });
@@ -364,19 +355,9 @@ export default function ConflictScreen({ userProfile, onUpdateProfile, onBack, o
     }
     setDraggingOp(null); setSelectedLane(null); setSelectedRow(null);
   };
-  const handleCombatEvent = (lane: number, row: number, value: number, type: any) => {
-    // Combat events from host are in KERNEL coordinates.
-    const isPl = side === 'PLAYER';
-    const displayRow = isPl ? row : 6 - row;
-    const displayLane = isPl ? lane : 2 - lane;
-    const pos = project(displayLane, displayRow, 10); 
-    floatingLabels.current.push({ id: Math.random().toString(36).substr(2, 9), x: pos.x + (Math.random()-0.5)*30, y: pos.y + (Math.random()-0.5)*15, value: value > 0 ? value.toString() : '', type, life: 1.0, createdAt: Date.now() });
-  };
   const handleAuthorize = () => { setPlayerReady(true); channelRef.current?.send({ type: 'broadcast', event: 'authorize_ready', payload: { side } }); };
 
-  // --- UI (SIMULATION MIRROR) ---
-  if (isQueuing) {
-    return (
+  if (isQueuing) return (
       <div className="flex flex-col items-center justify-center h-full bg-black relative overflow-hidden">
         <div className="absolute inset-0 opacity-10 pointer-events-none"> <div className="absolute top-0 left-0 w-full h-px bg-rhodes-blue" /> <div className="absolute bottom-0 left-0 w-full h-px bg-rhodes-blue" /> </div>
         <motion.div initial={{ opacity: 0, scale: 0.9 }} animate={{ opacity: 1, scale: 1 }} className="flex flex-col items-center relative z-10 p-8 text-center">
@@ -385,8 +366,7 @@ export default function ConflictScreen({ userProfile, onUpdateProfile, onBack, o
           <button onClick={onBack} className="mt-24 terminal-text text-[10px] text-white/40 hover:text-white tracking-[0.4em] uppercase font-bold">Abort Search</button>
         </motion.div>
       </div>
-    );
-  }
+  );
 
   return (
     <div className="flex flex-col h-full bg-black relative overflow-hidden select-none" onMouseMove={handleDragMove} onTouchMove={handleDragMove} onMouseUp={handleDragEnd} onTouchEnd={handleDragEnd}>
