@@ -530,6 +530,9 @@ export default function SimulationScreen({ userProfile, onUpdateProfile, onBack,
         if (unit.name === 'Originium Slug') {
             s = 800;
             yOff = 225;
+        } else if (unit.name === 'Zima' || unit.id.includes('zima')) {
+            s = 180;
+            yOff = 52;
         } else if (unit.name === 'Sarkaz Mercenary') {
             s = 700;
             yOff = 197;
