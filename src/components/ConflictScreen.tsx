@@ -276,9 +276,9 @@ export default function ConflictScreen({ userProfile, onUpdateProfile, onBack, o
             ctx.save(); if (isPending) ctx.globalAlpha = 0.4;
             ctx.shadowBlur = isPending ? 20 : 10; ctx.shadowColor = mainColor + '44';
             let s = 140; let yOff = 40; 
-            if (id.includes('slug')) { s = 800; yOff = 225; } 
-            else if (id.includes('zima') || name === 'Zima') { s = 180; yOff = 52; } 
-            else if (id.includes('sarkaz')) { s = 700; yOff = 197; }
+            if (id.toLowerCase().includes('slug')) { s = 800; yOff = 225; } 
+            else if (id.toLowerCase().includes('zima') || name.toLowerCase().includes('zima')) { s = 550; yOff = 155; } 
+            else if (id.toLowerCase().includes('sarkaz')) { s = 700; yOff = 197; }
             ctx.drawImage(spriteImg, basePos.x - s/2, basePos.y - s + yOff, s, s); ctx.restore();
         }
         if (!isPending && hp !== undefined && maxHp !== undefined) {
