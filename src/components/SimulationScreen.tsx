@@ -525,11 +525,14 @@ export default function SimulationScreen({ userProfile, onUpdateProfile, onBack,
         ctx.save();
         ctx.shadowBlur = 15;
         ctx.shadowColor = mainColor + '44';
-        let s = 140; // Massive presence
-        let yOff = 40;
+        let s = 100; 
+        let yOff = 30;
         if (unit.name === 'Originium Slug') {
             s = 800;
             yOff = 225;
+        } else if (unit.id.toLowerCase().includes('zima') || unit.name.toLowerCase().includes('zima')) {
+            s = 380;
+            yOff = 108;
         } else if (unit.name === 'Sarkaz Mercenary') {
             s = 700;
             yOff = 197;
