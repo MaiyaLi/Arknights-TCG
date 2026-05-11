@@ -39,8 +39,8 @@ export type GamePhase = 'COMMAND' | 'ACTION' | 'ENEMY' | 'GAMEOVER';
 export class BattleKernel {
   playerLP: number = 3;
   aiLP: number = 3;
-  playerDP: number = 10;
-  aiDP: number = 10;
+  playerDP: number = 15;
+  aiDP: number = 15;
   units: GameUnit[] = [];
   startTime: number = 0;
   lastTickTime: number = 0;
@@ -96,7 +96,7 @@ export class BattleKernel {
     this.turnCount++;
     this.onTurnStart(this.turnCount);
     
-    // DP Generation: Gain 2 DP every "Execute" cycle
+    // DP Generation: Gain 2 DP every "Execute" cycle for BOTH sides in Conflict
     this.playerDP += 2;
     this.aiDP += 2;
 
@@ -437,6 +437,14 @@ export class BattleKernel {
         const isEngaged = this.units.some(a => a.owner === attacker.owner && a.lane === u.lane && a.row === u.row && a.blockCount > 0);
         if (!isEngaged) return false; // Untargetable if not blocked
       }
+      
+      // Specialized Reveal Logic: If a stealth unit is blocking an enemy in a collision lock, 
+      // they should "appear" (become targetable) to reflect the "push forward" blocking.
+      const isBlockingTarget = this.units.some(a => a.owner !== u.owner && a.lane === u.lane && a.row === u.row && a.blockCount > 0);
+      if (isBlockingTarget && (u.id === 'manticore_001' || u.id === 'ethan_001')) {
+        return true; // Revealed by blocking
+      }
+
       return true;
     });
 
@@ -468,6 +476,15 @@ export class BattleKernel {
   private updateMovementStrict() {
     this.units.forEach(unit => {
       if (unit.stunTurns > 0 || unit.hp <= 0) { unit.isMoving = false; return; }
+      
+      // DEPLOYMENT DELAY: Newly deployed units stay in position for their first TWO turns.
+      // They stay invisible for Turn 1, and remain stationary for Turn 2.
+      // Movement only begins after the 3rd authorization (turnsOnBoard > 2).
+      if (unit.turnsOnBoard <= 2) { 
+        unit.isMoving = false; 
+        return; 
+      }
+
       const ownerLP = unit.owner === 'PLAYER' ? this.playerLP : this.aiLP;
       if (unit.class === 'Vanguard' && ownerLP > 1) { unit.isStationary = true; return; } else { unit.isStationary = false; }
       if (unit.isStationary) return;
@@ -697,20 +714,32 @@ export class BattleKernel {
   }
 
   tick() {
-    // In V2, tick is only for real-time effects like stun timers or DP regen if any, 
-    // but movement/combat is now triggered by executeStrategy.
-    // We keep it for UI updates and stun countdowns.
     if (this.isPaused || this.phase === 'GAMEOVER') return;
+    
+    // Real-time DP Regeneration (Passive: ~1 DP every 5 seconds)
+    if (this.phase === 'COMMAND') {
+        const now = Date.now();
+        const delta = (now - this.lastTickTime) / 1000;
+        this.lastTickTime = now;
+        
+        // Accumulate DP
+        this.playerDP = Math.min(99, this.playerDP + 0.2 * delta);
+        this.aiDP = Math.min(99, this.aiDP + 0.2 * delta);
+    } else {
+        this.lastTickTime = Date.now();
+    }
   }
 
-  useItem(operator: Operator, lane: number, row: number, owner: 'PLAYER' | 'AI'): boolean {
+  useItem(operator: Operator, lane: number, row: number, owner: 'PLAYER' | 'AI', bypassCost: boolean = false): boolean {
     const cost = operator.dp_cost;
-    if (owner === 'PLAYER') {
-      if (this.playerDP < cost) return false;
-      this.playerDP -= cost;
-    } else {
-      if (this.aiDP < cost) return false;
-      this.aiDP -= cost;
+    if (!bypassCost) {
+      if (owner === 'PLAYER') {
+        if (this.playerDP < cost) return false;
+        this.playerDP -= cost;
+      } else {
+        if (this.aiDP < cost) return false;
+        this.aiDP -= cost;
+      }
     }
 
     // Apply immediate effect based on item ID
@@ -741,17 +770,19 @@ export class BattleKernel {
     return true;
   }
 
-  deployUnit(operator: Operator, owner: 'PLAYER' | 'AI', lane: number, row: number) {
-    if (operator.class === 'Item') return this.useItem(operator, lane, row, owner);
+  deployUnit(operator: Operator, owner: 'PLAYER' | 'AI', lane: number, row: number, bypassCost: boolean = false) {
+    if (operator.class === 'Item') return this.useItem(operator, lane, row, owner, bypassCost);
     if (!this.canDeploy(operator.class, row, owner)) return false;
     
     const cost = operator.dp_cost;
-    if (owner === 'PLAYER') {
-      if (this.playerDP < cost) return false;
-      this.playerDP -= cost;
-    } else {
-      if (this.aiDP < cost) return false;
-      this.aiDP -= cost;
+    if (!bypassCost) {
+      if (owner === 'PLAYER') {
+        if (this.playerDP < cost) return false;
+        this.playerDP -= cost;
+      } else {
+        if (this.aiDP < cost) return false;
+        this.aiDP -= cost;
+      }
     }
 
     // Check occupancy (except for Row 3 which allows dual occupancy)

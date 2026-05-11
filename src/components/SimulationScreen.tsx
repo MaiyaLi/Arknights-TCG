@@ -1,17 +1,18 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { 
-  ChevronLeft, 
-  Pause, 
-  Play, 
-  RotateCcw, 
-  Zap, 
+import {
+  ChevronLeft,
+  Pause,
+  Play,
+  RotateCcw,
+  Zap,
   Heart,
   Trash2,
   Star
 } from 'lucide-react';
 import { UserProfile } from '../types';
 import { ALL_ASSETS, AI_ENEMIES, Operator } from '../data/operators';
+import MatchResultOverlay from './MatchResultOverlay';
 import { BattleKernel, GameUnit, GamePhase } from '../game/BattleKernel';
 import { MirrorAI } from '../game/MirrorAI';
 import { getSpriteImagePath, getCardImagePath } from '../utils/assetUtils';
@@ -54,11 +55,11 @@ export default function SimulationScreen({ userProfile, onUpdateProfile, onBack,
   const [selectedSlot, setSelectedSlot] = useState<{ lane: number, row: number } | null>(null);
   const [playerCooldowns, setPlayerCooldowns] = useState<{ op: Operator, turnsRemaining: number }[]>([]);
   const [swapSourceId, setSwapSourceId] = useState<string | null>(null);
-  
+
   const lastDragTime = useRef<number>(0);
-  
+
   const floatingLabels = useRef<FloatingLabel[]>([]);
-  
+
   const [uiState, setUiState] = useState({
     playerLP: 3,
     aiLP: 3,
@@ -84,7 +85,7 @@ export default function SimulationScreen({ userProfile, onUpdateProfile, onBack,
       // Permanent removal: Do NOT add back to cooldowns or deck
       return;
     }
-    
+
     if (unit.owner === 'PLAYER') {
       const op = ALL_ASSETS.find(a => a.id === unit.id);
       if (op) {
@@ -96,11 +97,11 @@ export default function SimulationScreen({ userProfile, onUpdateProfile, onBack,
         let cooldown = 4; // Base 4 turns
         if (op.class === 'Specialist') cooldown = 1; // Fast Redeploy
         if (op.id === 'fang_001') cooldown -= 1; // Passive
-        
+
         // Items and Robots might have different rules
         if (op.class === 'Robot') cooldown = 8; // Robots have long cooldowns
         if (op.class === 'Item') cooldown = 10; // Items are usually one-off or very long
-        
+
         setPlayerCooldowns(prev => [...prev, { op, turnsRemaining: Math.max(1, cooldown) }]);
       }
     }
@@ -111,11 +112,11 @@ export default function SimulationScreen({ userProfile, onUpdateProfile, onBack,
       const updated = prev.map(c => ({ ...c, turnsRemaining: c.turnsRemaining - 1 }));
       const finished = updated.filter(c => c.turnsRemaining <= 0);
       const remaining = updated.filter(c => c.turnsRemaining > 0);
-      
+
       if (finished.length > 0) {
         setPlayerDeck(deck => [...deck, ...finished.map(c => c.op)]);
       }
-      
+
       return remaining;
     });
   };
@@ -125,7 +126,7 @@ export default function SimulationScreen({ userProfile, onUpdateProfile, onBack,
     // Add jitter to prevent stacking overlap
     const jitterX = (Math.random() - 0.5) * 30;
     const jitterY = (Math.random() - 0.5) * 15;
-    
+
     const id = Math.random().toString(36).substr(2, 9);
     floatingLabels.current.push({
       id,
@@ -140,8 +141,8 @@ export default function SimulationScreen({ userProfile, onUpdateProfile, onBack,
 
   // 3. Game Engine Initialization
   const [kernel] = useState(() => new BattleKernel(
-    handleGameOver, 
-    handleUnitReachedBase, 
+    handleGameOver,
+    handleUnitReachedBase,
     handleUnitRemoved,
     (p) => setPhase(p),
     handleTurnStart,
@@ -164,15 +165,15 @@ export default function SimulationScreen({ userProfile, onUpdateProfile, onBack,
     // Apply non-linear progress for perspective depth
     const linearProgress = Math.max(-0.1, r / 6);
     const progress = Math.pow(Math.abs(linearProgress), PROJECT_CONFIG.zFactor) * (linearProgress < 0 ? -1 : 1);
-    
+
     const currY = PROJECT_CONFIG.topY + progress * (PROJECT_CONFIG.bottomY - PROJECT_CONFIG.topY);
     // Width interpolation uses linear progress to preserve lane straightness in perspective
     const currW = PROJECT_CONFIG.topWidth + linearProgress * (PROJECT_CONFIG.bottomWidth - PROJECT_CONFIG.topWidth);
-    
+
     const startX = (CANVAS_W - currW) / 2;
     // (l + 0.5) to center in the lane
     const currX = startX + (l + 0.5) * (currW / 3);
-    
+
     return { x: currX, y: currY - z };
   };
 
@@ -210,53 +211,53 @@ export default function SimulationScreen({ userProfile, onUpdateProfile, onBack,
     const gridRows = 12;
     const gridCols = 8;
     for (let i = 0; i <= gridRows; i++) {
-        const pStart = project(-1.5, i * (7 / gridRows) - 0.5);
-        const pEnd = project(3.5, i * (7 / gridRows) - 0.5);
-        ctx.beginPath();
-        ctx.moveTo(pStart.x, pStart.y);
-        ctx.lineTo(pEnd.x, pEnd.y);
-        ctx.stroke();
+      const pStart = project(-1.5, i * (7 / gridRows) - 0.5);
+      const pEnd = project(3.5, i * (7 / gridRows) - 0.5);
+      ctx.beginPath();
+      ctx.moveTo(pStart.x, pStart.y);
+      ctx.lineTo(pEnd.x, pEnd.y);
+      ctx.stroke();
     }
     for (let i = 0; i <= gridCols; i++) {
-        const pStart = project(i * (5 / gridCols) - 1.5, -0.5);
-        const pEnd = project(i * (5 / gridCols) - 1.5, 6.5);
-        ctx.beginPath();
-        ctx.moveTo(pStart.x, pStart.y);
-        ctx.lineTo(pEnd.x, pEnd.y);
-        ctx.stroke();
+      const pStart = project(i * (5 / gridCols) - 1.5, -0.5);
+      const pEnd = project(i * (5 / gridCols) - 1.5, 6.5);
+      ctx.beginPath();
+      ctx.moveTo(pStart.x, pStart.y);
+      ctx.lineTo(pEnd.x, pEnd.y);
+      ctx.stroke();
     }
 
     // Draw Vertical Scanning Waves
     const time = Date.now() / 2000;
     for (let i = 0; i < 2; i++) {
-        const rPos = ((time + i * 0.5) % 1) * 7 - 0.5;
-        const pS = project(-1, rPos);
-        const pE = project(3, rPos);
-        ctx.strokeStyle = `rgba(0, 152, 217, ${0.1 * (1 - rPos/7)})`;
-        ctx.beginPath();
-        ctx.moveTo(pS.x, pS.y);
-        ctx.lineTo(pE.x, pE.y);
-        ctx.stroke();
+      const rPos = ((time + i * 0.5) % 1) * 7 - 0.5;
+      const pS = project(-1, rPos);
+      const pE = project(3, rPos);
+      ctx.strokeStyle = `rgba(0, 152, 217, ${0.1 * (1 - rPos / 7)})`;
+      ctx.beginPath();
+      ctx.moveTo(pS.x, pS.y);
+      ctx.lineTo(pE.x, pE.y);
+      ctx.stroke();
     }
 
-        // Draw Tactical Environment (Floating Platforms)
+    // Draw Tactical Environment (Floating Platforms)
     for (let r = 0; r < 7; r++) {
       for (let l = 0; l < 3; l++) {
         const isSelected = selectedLane === l && selectedRow === r;
         const isOccupied = kernel.units.some(u => u.lane === l && u.row === r);
-        
+
         // Item Logic: Can be dropped anywhere in rows 1-5
         const isItem = draggingOp?.op.class === 'Item';
-        const classValid = isItem 
-          ? (r >= 1 && r <= 5) 
+        const classValid = isItem
+          ? (r >= 1 && r <= 5)
           : (draggingOp ? kernel.canDeploy(draggingOp.op.class, r, 'PLAYER') : false);
-        
+
         const isPlaceable = draggingOp && classValid && (isItem || !isOccupied);
         const isInvalid = draggingOp && (!classValid || (!isItem && isOccupied));
-        
+
         // Platform "Pad" sizes - strictly independent
-        const padSize = isSelected ? 0.43 : 0.4; 
-        
+        const padSize = isSelected ? 0.43 : 0.4;
+
         const center = project(l, r);
         const p0 = project(l - padSize, r - padSize);
         const p1 = project(l + padSize, r - padSize);
@@ -271,22 +272,22 @@ export default function SimulationScreen({ userProfile, onUpdateProfile, onBack,
         const p3d = { x: p3.x, y: p3.y + baseHeight };
 
         // Draw Sides (Front and Right with lighting)
-        let sideColor = isSelected 
-          ? 'rgba(0, 255, 231, 0.4)' 
+        let sideColor = isSelected
+          ? 'rgba(0, 255, 231, 0.4)'
           : (isPlaceable ? 'rgba(0, 152, 217, 0.25)' : 'rgba(0, 152, 217, 0.1)');
-        
+
         if (isInvalid) {
           sideColor = 'rgba(255, 59, 59, 0.15)';
         }
-        
+
         ctx.fillStyle = sideColor;
         ctx.beginPath();
         ctx.moveTo(p3.x, p3.y); ctx.lineTo(p2.x, p2.y); ctx.lineTo(p2d.x, p2d.y); ctx.lineTo(p3d.x, p3d.y);
         ctx.closePath();
         ctx.fill();
 
-        ctx.fillStyle = isSelected 
-          ? 'rgba(0, 255, 231, 0.3)' 
+        ctx.fillStyle = isSelected
+          ? 'rgba(0, 255, 231, 0.3)'
           : (isPlaceable ? 'rgba(0, 152, 217, 0.2)' : 'rgba(0, 152, 217, 0.05)');
         ctx.beginPath();
         ctx.moveTo(p2.x, p2.y); ctx.lineTo(p1.x, p1.y); ctx.lineTo(p1d.x, p1d.y); ctx.lineTo(p2d.x, p2d.y);
@@ -294,12 +295,12 @@ export default function SimulationScreen({ userProfile, onUpdateProfile, onBack,
         ctx.fill();
 
         // Draw Top Surface
-        let surfaceColor = isSelected 
-          ? 'rgba(0, 152, 217, 0.4)' 
+        let surfaceColor = isSelected
+          ? 'rgba(0, 152, 217, 0.4)'
           : (isPlaceable ? 'rgba(0, 152, 217, 0.2)' : 'rgba(10, 10, 20, 0.98)');
-        
-        let borderColor = isSelected 
-          ? 'rgba(0, 255, 231, 1)' 
+
+        let borderColor = isSelected
+          ? 'rgba(0, 255, 231, 1)'
           : (isPlaceable ? 'rgba(0, 255, 231, 1)' : 'rgba(0, 152, 217, 0.15)');
 
         if (isInvalid) {
@@ -311,7 +312,7 @@ export default function SimulationScreen({ userProfile, onUpdateProfile, onBack,
           // ENEMY GOAL (RED BOX)
           surfaceColor = isSelected ? 'rgba(255, 59, 59, 0.8)' : (isInvalid ? 'rgba(255, 59, 59, 0.2)' : 'rgba(255, 59, 59, 0.4)');
           borderColor = 'rgba(255, 0, 0, 1)';
-          
+
           // Add Holographic Pillar effect for Goal
           const pPillar = project(l, r, 20);
           const pillarGrad = ctx.createLinearGradient(0, center.y, 0, pPillar.y);
@@ -335,7 +336,7 @@ export default function SimulationScreen({ userProfile, onUpdateProfile, onBack,
           // PLAYER GOAL (BLUE BOX)
           surfaceColor = isSelected ? 'rgba(0, 255, 231, 0.7)' : (isInvalid ? 'rgba(255, 59, 59, 0.2)' : 'rgba(0, 255, 231, 0.4)');
           borderColor = 'rgba(0, 255, 231, 1)';
-          
+
           // Add Holographic Pillar effect
           const pPillar = project(l, r, 20);
           const pillarGrad = ctx.createLinearGradient(0, center.y, 0, pPillar.y);
@@ -382,43 +383,43 @@ export default function SimulationScreen({ userProfile, onUpdateProfile, onBack,
 
         // Guide Pulse for placeable tiles - EXTREME TACTICAL VISIBILITY
         if (isPlaceable) {
-            const pulse = (Math.sin(Date.now() / 150) + 1) / 2;
-            
-            // 1. Ground Tactical Zone
-            ctx.fillStyle = `rgba(0, 255, 231, ${0.1 + 0.15 * pulse})`;
-            ctx.beginPath();
-            ctx.moveTo(p0.x, p0.y); ctx.lineTo(p1.x, p1.y); ctx.lineTo(p2.x, p2.y); ctx.lineTo(p3.x, p3.y);
-            ctx.closePath();
-            ctx.fill();
+          const pulse = (Math.sin(Date.now() / 150) + 1) / 2;
 
-            // 2. Animated Scanning Beam
-            const beamHeight = 40;
-            const pBeam = project(l, r, beamHeight);
-            const beamGrad = ctx.createLinearGradient(0, center.y, 0, pBeam.y);
-            beamGrad.addColorStop(0, `rgba(0, 255, 231, ${0.4 * pulse})`);
-            beamGrad.addColorStop(1, 'rgba(0, 255, 231, 0)');
-            
-            ctx.strokeStyle = `rgba(0, 255, 231, ${0.6 * pulse})`;
-            ctx.lineWidth = 1;
-            ctx.strokeRect(center.x - 10 * pulse, pBeam.y, 20 * pulse, 1);
-            
-            ctx.fillStyle = beamGrad;
-            ctx.beginPath();
-            ctx.moveTo(p0.x, p0.y); ctx.lineTo(p1.x, p1.y);
-            ctx.lineTo(pBeam.x + 8, pBeam.y); ctx.lineTo(pBeam.x - 8, pBeam.y);
-            ctx.closePath();
-            ctx.fill();
+          // 1. Ground Tactical Zone
+          ctx.fillStyle = `rgba(0, 255, 231, ${0.1 + 0.15 * pulse})`;
+          ctx.beginPath();
+          ctx.moveTo(p0.x, p0.y); ctx.lineTo(p1.x, p1.y); ctx.lineTo(p2.x, p2.y); ctx.lineTo(p3.x, p3.y);
+          ctx.closePath();
+          ctx.fill();
 
-            // 3. Thick Animated Border
-            ctx.strokeStyle = `rgba(0, 255, 231, ${0.4 + 0.5 * pulse})`;
-            ctx.lineWidth = 2.5;
-            ctx.setLineDash([8, 4]);
-            ctx.lineDashOffset = -Date.now() / 30;
-            ctx.beginPath();
-            ctx.moveTo(p0.x, p0.y); ctx.lineTo(p1.x, p1.y); ctx.lineTo(p2.x, p2.y); ctx.lineTo(p3.x, p3.y);
-            ctx.closePath();
-            ctx.stroke();
-            ctx.setLineDash([]);
+          // 2. Animated Scanning Beam
+          const beamHeight = 40;
+          const pBeam = project(l, r, beamHeight);
+          const beamGrad = ctx.createLinearGradient(0, center.y, 0, pBeam.y);
+          beamGrad.addColorStop(0, `rgba(0, 255, 231, ${0.4 * pulse})`);
+          beamGrad.addColorStop(1, 'rgba(0, 255, 231, 0)');
+
+          ctx.strokeStyle = `rgba(0, 255, 231, ${0.6 * pulse})`;
+          ctx.lineWidth = 1;
+          ctx.strokeRect(center.x - 10 * pulse, pBeam.y, 20 * pulse, 1);
+
+          ctx.fillStyle = beamGrad;
+          ctx.beginPath();
+          ctx.moveTo(p0.x, p0.y); ctx.lineTo(p1.x, p1.y);
+          ctx.lineTo(pBeam.x + 8, pBeam.y); ctx.lineTo(pBeam.x - 8, pBeam.y);
+          ctx.closePath();
+          ctx.fill();
+
+          // 3. Thick Animated Border
+          ctx.strokeStyle = `rgba(0, 255, 231, ${0.4 + 0.5 * pulse})`;
+          ctx.lineWidth = 2.5;
+          ctx.setLineDash([8, 4]);
+          ctx.lineDashOffset = -Date.now() / 30;
+          ctx.beginPath();
+          ctx.moveTo(p0.x, p0.y); ctx.lineTo(p1.x, p1.y); ctx.lineTo(p2.x, p2.y); ctx.lineTo(p3.x, p3.y);
+          ctx.closePath();
+          ctx.stroke();
+          ctx.setLineDash([]);
         }
 
         // Selected Crosshair
@@ -429,7 +430,7 @@ export default function SimulationScreen({ userProfile, onUpdateProfile, onBack,
           ctx.moveTo(center.x - 10, center.y); ctx.lineTo(center.x + 10, center.y);
           ctx.moveTo(center.x, center.y - 6); ctx.lineTo(center.x, center.y + 6);
           ctx.stroke();
-          
+
           // Corner accents
           [p0, p1, p2, p3].forEach((p, i) => {
             const angle = (i * Math.PI) / 2 + Math.PI / 4;
@@ -451,7 +452,7 @@ export default function SimulationScreen({ userProfile, onUpdateProfile, onBack,
     // Goal Accents
     const aiBase = project(1, 0.2); // Move labels further onto the visible map
     const plBase = project(1, 5.8);
-    
+
     ctx.font = '900 10px monospace';
     ctx.textAlign = 'center';
     ctx.fillStyle = 'rgba(255, 59, 59, 0.9)';
@@ -476,13 +477,13 @@ export default function SimulationScreen({ userProfile, onUpdateProfile, onBack,
 
       let lane = unit.lane;
       const row = unit.row;
-      
+
       const isClashRow = row === 3;
       let xOffset = 0;
       if (isClashRow) {
         xOffset = unit.owner === 'PLAYER' ? -0.25 : 0.25;
       }
-      
+
       const unitHeight = 15; // Vertical displacement for 2.5D
       const basePos = project(lane + xOffset, row, 0);
       const mainPos = project(lane + xOffset, row, unitHeight);
@@ -505,7 +506,7 @@ export default function SimulationScreen({ userProfile, onUpdateProfile, onBack,
         ctx.arc(mainPos.x, mainPos.y, 25, 0, Math.PI * 2);
         ctx.stroke();
         ctx.setLineDash([]);
-        
+
         ctx.shadowBlur = 10;
         ctx.shadowColor = '#facc15';
 
@@ -525,21 +526,22 @@ export default function SimulationScreen({ userProfile, onUpdateProfile, onBack,
         ctx.save();
         ctx.shadowBlur = 15;
         ctx.shadowColor = mainColor + '44';
-        let s = 100; 
-        let yOff = 30;
+        let s = 140;
+        let yOff = 40;
+        let xOff = 0;
         if (unit.name === 'Originium Slug') {
-            s = 800;
-            yOff = 225;
+          s = 800;
+          yOff = 225;
         } else if (unit.id.toLowerCase().includes('zima') || unit.name.toLowerCase().includes('zima')) {
-            s = 380;
-            yOff = 108;
+          s = 145;
+          yOff = 42;
         } else if (unit.name === 'Sarkaz Mercenary') {
-            s = 700;
-            yOff = 197;
+          s = 700;
+          yOff = 197;
         }
-        
-        // Anchor deeper into the image (+yOff) to align the feet with the grid floor
-        ctx.drawImage(spriteImg, basePos.x - s/2, basePos.y - s + yOff, s, s);
+
+        const mainPos = project(unit.lane, unit.row);
+        ctx.drawImage(spriteImg, mainPos.x - s / 2 + xOff, mainPos.y - s + yOff, s, s);
         ctx.restore();
       } else {
         // Fallback: Tactical Hologram
@@ -567,7 +569,7 @@ export default function SimulationScreen({ userProfile, onUpdateProfile, onBack,
       if (unit.owner === 'PLAYER' && unit.ability.type === 'activated') {
         const isReady = unit.sp >= unit.maxSp;
         const isActive = unit.isSkillActive;
-        
+
         ctx.strokeStyle = isActive ? '#fff' : (isReady ? '#facc15' : 'rgba(255,255,255,0.2)');
         ctx.lineWidth = 2;
         ctx.beginPath();
@@ -588,7 +590,7 @@ export default function SimulationScreen({ userProfile, onUpdateProfile, onBack,
           ctx.fillStyle = isReady ? '#facc15' : 'rgba(255,255,255,0.1)';
           ctx.beginPath();
           ctx.moveTo(mainPos.x + 30, mainPos.y - 30);
-          ctx.arc(mainPos.x + 30, mainPos.y - 30, 4, -Math.PI/2, -Math.PI/2 + (Math.PI * 2 * spPercent));
+          ctx.arc(mainPos.x + 30, mainPos.y - 30, 4, -Math.PI / 2, -Math.PI / 2 + (Math.PI * 2 * spPercent));
           ctx.fill();
         }
       }
@@ -630,7 +632,7 @@ export default function SimulationScreen({ userProfile, onUpdateProfile, onBack,
       ctx.arc(hoverPos.x, hoverPos.y, 30, 0, Math.PI * 2);
       ctx.stroke();
       ctx.setLineDash([]);
-      
+
       // Ring Outer Glow
       ctx.strokeStyle = glowColor + '33';
       ctx.lineWidth = 1;
@@ -643,7 +645,7 @@ export default function SimulationScreen({ userProfile, onUpdateProfile, onBack,
       ctx.font = '900 12px monospace';
       ctx.textAlign = 'center';
       ctx.fillText(isValid ? "INITIALIZING_DEPLOY" : "LINK_TERMINATED", hoverPos.x, hoverPos.y - 45);
-      
+
       // Operator Name in projection
       ctx.fillStyle = glowColor;
       ctx.font = '800 14px monospace';
@@ -657,7 +659,7 @@ export default function SimulationScreen({ userProfile, onUpdateProfile, onBack,
       const p1 = project(s.lane + 0.5, s.row - 0.5);
       const p2 = project(s.lane + 0.5, s.row + 0.5);
       const p3 = project(s.lane - 0.5, s.row + 0.5);
-      
+
       ctx.strokeStyle = '#facc15';
       ctx.lineWidth = 2;
       ctx.beginPath();
@@ -675,23 +677,23 @@ export default function SimulationScreen({ userProfile, onUpdateProfile, onBack,
       const age = currentTime - label.createdAt;
       const duration = 1200; // 1.2s lifespan
       label.life = 1 - (age / duration);
-      
+
       if (label.life <= 0) return false;
 
       const alpha = label.life;
       const yOffset = (1 - label.life) * 40; // Float up 40px
-      
+
       let color = '#fff';
       if (label.type === 'DAMAGE') color = '#ff3b3b';
       if (label.type === 'HEAL') color = '#22c55e';
       if (label.type === 'STUN') color = '#facc15';
       if (label.type === 'CRIT') color = '#fb923c';
       if (label.type === 'TRUE') color = '#ffffff';
-      
+
       ctx.save();
       ctx.globalAlpha = alpha;
       ctx.fillStyle = color;
-      
+
       if (label.type === 'CRIT') {
         ctx.font = '900 18px monospace';
         ctx.shadowBlur = 8;
@@ -705,7 +707,7 @@ export default function SimulationScreen({ userProfile, onUpdateProfile, onBack,
         ctx.shadowBlur = 4;
         ctx.shadowColor = 'rgba(0,0,0,0.5)';
       }
-      
+
       let labelText = label.value;
       if (label.type === 'HEAL') labelText = `+${label.value}`;
       if (label.type === 'CRIT') labelText = `!!${label.value}!!`;
@@ -714,7 +716,7 @@ export default function SimulationScreen({ userProfile, onUpdateProfile, onBack,
       ctx.textAlign = 'center';
       ctx.fillText(labelText, label.x, label.y - yOffset);
       ctx.restore();
-      
+
       return true;
     });
   }, [draggingOp, selectedLane, selectedRow, selectedSlot, kernel, isPaused, countdown, mulliganPhase]);
@@ -724,14 +726,14 @@ export default function SimulationScreen({ userProfile, onUpdateProfile, onBack,
     const rawSquad = userProfile.squads[userProfile.activeSquadIndex]
       .map(id => ALL_ASSETS.find(a => a.id === id))
       .filter(Boolean) as Operator[];
-    
+
     // Ensure unique operators by ID
     const squadMap = new Map<string, Operator>();
     rawSquad.forEach(op => {
       if (!squadMap.has(op.id)) squadMap.set(op.id, op);
     });
     const squad = Array.from(squadMap.values());
-    
+
     const shuffledSquad = [...squad].sort(() => Math.random() - 0.5);
     setPlayerSquad(shuffledSquad);
     setPlayerHand(shuffledSquad.slice(0, 4));
@@ -788,15 +790,15 @@ export default function SimulationScreen({ userProfile, onUpdateProfile, onBack,
 
       while (attempts < deck.length) {
         const topCard = deck[0];
-        const isDuplicate = playerHand.some(h => h.id === topCard.id) || 
-                            kernel.units.some(u => u.id === topCard.id && u.owner === 'PLAYER') ||
-                            playerCooldowns.some(c => c.op.id === topCard.id);
-        
+        const isDuplicate = playerHand.some(h => h.id === topCard.id) ||
+          kernel.units.some(u => u.id === topCard.id && u.owner === 'PLAYER') ||
+          playerCooldowns.some(c => c.op.id === topCard.id);
+
         if (!isDuplicate) {
           drawnCard = deck.shift()!;
           break;
         }
-        
+
         // Cycle duplicate to bottom
         deck.push(deck.shift()!);
         attempts++;
@@ -815,7 +817,7 @@ export default function SimulationScreen({ userProfile, onUpdateProfile, onBack,
   };
 
   const toggleMulliganSelection = (index: number) => {
-    setMulliganSelected(prev => 
+    setMulliganSelected(prev =>
       prev.includes(index) ? prev.filter(i => i !== index) : [...prev, index]
     );
   };
@@ -824,7 +826,7 @@ export default function SimulationScreen({ userProfile, onUpdateProfile, onBack,
     if (mulliganSelected.length > 0) {
       const newHand = [...playerHand];
       const newDeck = [...playerDeck];
-      
+
       mulliganSelected.forEach(idx => {
         const cardToSwap = newHand[idx];
         const newCard = newDeck.shift();
@@ -833,7 +835,7 @@ export default function SimulationScreen({ userProfile, onUpdateProfile, onBack,
           newDeck.push(cardToSwap);
         }
       });
-      
+
       setPlayerHand(newHand);
       setPlayerDeck(newDeck);
     }
@@ -885,7 +887,7 @@ export default function SimulationScreen({ userProfile, onUpdateProfile, onBack,
   const handleDragEnd = () => {
     if (!draggingOp) return;
     lastDragTime.current = Date.now();
-    
+
     if (selectedLane !== null && selectedRow !== null) {
       if (kernel.deployUnit(draggingOp.op, 'PLAYER', selectedLane, selectedRow)) {
         setPlayerHand(prev => prev.filter((_, i) => i !== draggingOp.index));
@@ -904,10 +906,10 @@ export default function SimulationScreen({ userProfile, onUpdateProfile, onBack,
     const rect = canvas.getBoundingClientRect();
     const scaleX = canvas.width / rect.width;
     const scaleY = canvas.height / rect.height;
-    
+
     const x = (e.clientX - rect.left) * scaleX;
     const y = (e.clientY - rect.top) * scaleY;
-    
+
     const { lane, row } = unproject(x, y);
 
     if (lane === null || row === null) {
@@ -920,7 +922,7 @@ export default function SimulationScreen({ userProfile, onUpdateProfile, onBack,
     setSelectedSlot({ lane, row });
 
     let unit = kernel.units.find(u => u.lane === lane && u.row === row);
-    
+
     // Improved selection for clash row (dual occupancy)
     if (row === 3) {
       const p = project(lane, row);
@@ -961,7 +963,7 @@ export default function SimulationScreen({ userProfile, onUpdateProfile, onBack,
     }
   };
 
-  const inspectedUnit = selectedSlot 
+  const inspectedUnit = selectedSlot
     ? kernel.units.find(u => u.lane === selectedSlot.lane && u.row === selectedSlot.row)
     : null;
 
@@ -998,7 +1000,7 @@ export default function SimulationScreen({ userProfile, onUpdateProfile, onBack,
   };
 
   return (
-    <div 
+    <div
       className="flex flex-col h-full bg-black relative overflow-hidden select-none"
       onMouseMove={handleDragMove}
       onTouchMove={handleDragMove}
@@ -1007,23 +1009,23 @@ export default function SimulationScreen({ userProfile, onUpdateProfile, onBack,
     >
       {/* Header */}
       <div className="p-2 px-4 border-b border-rhodes-border flex justify-between items-center bg-black/95 backdrop-blur-md z-30 shrink-0 shadow-lg">
-        <button 
-          onClick={onBack} 
+        <button
+          onClick={onBack}
           className="flex items-center gap-2 text-white/40 hover:text-rhodes-blue transition-colors group"
         >
           <ChevronLeft className="w-4 h-4 group-hover:-translate-x-1 transition-transform" />
           <span className="terminal-text text-[8px] font-bold tracking-widest uppercase truncate max-w-[50px] sm:max-w-none">Abort</span>
         </button>
-        
+
         <div className="flex gap-4 sm:gap-8 items-center">
           {/* Player LP */}
           <div className="flex flex-col items-center gap-1">
             <div className="flex items-center gap-2">
               <div className="flex gap-0.5">
                 {[...Array(3)].map((_, i) => (
-                  <div 
-                    key={i} 
-                    className={`h-4 w-1.5 rounded-sm skew-x-[-15deg] ${i < uiState.playerLP ? 'bg-rhodes-blue' : 'bg-white/5 border border-white/5'}`} 
+                  <div
+                    key={i}
+                    className={`h-4 w-1.5 rounded-sm skew-x-[-15deg] ${i < uiState.playerLP ? 'bg-rhodes-blue' : 'bg-white/5 border border-white/5'}`}
                   />
                 ))}
               </div>
@@ -1044,9 +1046,9 @@ export default function SimulationScreen({ userProfile, onUpdateProfile, onBack,
               <span className="terminal-text font-black text-xs text-red-500">{uiState.aiLP}</span>
               <div className="flex gap-0.5">
                 {[...Array(3)].map((_, i) => (
-                  <div 
-                    key={i} 
-                    className={`h-4 w-1.5 rounded-sm skew-x-[-15deg] ${i < uiState.aiLP ? 'bg-red-500 shadow-[0_0_5px_rgba(239,68,68,0.5)]' : 'bg-white/5 border border-white/5'}`} 
+                  <div
+                    key={i}
+                    className={`h-4 w-1.5 rounded-sm skew-x-[-15deg] ${i < uiState.aiLP ? 'bg-red-500 shadow-[0_0_5px_rgba(239,68,68,0.5)]' : 'bg-white/5 border border-white/5'}`}
                   />
                 ))}
               </div>
@@ -1055,8 +1057,8 @@ export default function SimulationScreen({ userProfile, onUpdateProfile, onBack,
           </div>
         </div>
 
-        <button 
-          onClick={togglePause} 
+        <button
+          onClick={togglePause}
           className={`p-2 rounded-full border transition-all ${isPaused ? 'bg-rhodes-blue text-black border-rhodes-blue' : 'bg-black border-white/10 text-white/40 hover:text-white'}`}
         >
           {isPaused ? <Play className="w-4 h-4" /> : <Pause className="w-4 h-4" />}
@@ -1065,18 +1067,32 @@ export default function SimulationScreen({ userProfile, onUpdateProfile, onBack,
 
       {/* Battlefield */}
       <div className="flex-1 relative bg-black/40 overflow-hidden">
-        <canvas 
-          ref={canvasRef} 
-          width={450} 
-          height={400} 
+        <canvas
+          ref={canvasRef}
+          width={450}
+          height={400}
           className="w-full h-full cursor-crosshair"
           onClick={handleCanvasClick}
+        />
+
+        <MatchResultOverlay 
+          isOpen={winner !== null}
+          result={winner === 'PLAYER' ? 'Win' : 'Loss'}
+          onClose={onBack}
+          onRetry={() => { setWinner(null); kernelRef.current?.start(); }}
+          stats={{
+            time: '02:45',
+            operatorsDeployed: 8,
+            damageDealt: 8600,
+            score: winner === 'PLAYER' ? 'A' : 'D'
+          }}
+          rewards={winner === 'PLAYER' ? { orundum: 50, exp: 25, certificates: 2 } : { orundum: 5, exp: 2, certificates: 0 }}
         />
 
         {/* Inspector Panel */}
         <AnimatePresence>
           {inspectedUnit && (
-            <motion.div 
+            <motion.div
               initial={{ x: 300, opacity: 0 }}
               animate={{ x: 0, opacity: 1 }}
               exit={{ x: 300, opacity: 0 }}
@@ -1094,8 +1110,8 @@ export default function SimulationScreen({ userProfile, onUpdateProfile, onBack,
                     ))}
                   </div>
                 </div>
-                <button 
-                  onClick={() => setSelectedSlot(null)} 
+                <button
+                  onClick={() => setSelectedSlot(null)}
                   className="p-1 hover:bg-white/5 rounded-full transition-colors text-white/40 hover:text-white"
                 >
                   <ChevronLeft className="w-4 h-4 rotate-180" />
@@ -1108,7 +1124,7 @@ export default function SimulationScreen({ userProfile, onUpdateProfile, onBack,
                   <span className="text-white font-black">{Math.ceil(inspectedUnit.hp)} / {inspectedUnit.maxHp}</span>
                 </div>
                 <div className="h-1.5 bg-white/5 rounded-full overflow-hidden border border-white/5">
-                  <motion.div 
+                  <motion.div
                     initial={{ width: 0 }}
                     animate={{ width: `${(inspectedUnit.hp / inspectedUnit.maxHp) * 100}%` }}
                     className={`h-full transition-all ${inspectedUnit.owner === 'PLAYER' ? 'bg-rhodes-blue' : 'bg-red-500'}`}
@@ -1118,11 +1134,11 @@ export default function SimulationScreen({ userProfile, onUpdateProfile, onBack,
 
               {inspectedUnit.stunTurns > 0 && (
                 <div className="bg-red-500/10 border border-red-500/30 p-2 rounded-sm flex items-center gap-2 shrink-0">
-                   <Zap className="w-3 h-3 text-red-500 animate-pulse" />
-                   <div className="flex flex-col">
-                      <span className="text-[7px] font-black text-red-500 uppercase terminal-text">Systems Suppressed</span>
-                      <span className="text-[9px] font-bold text-white/80 terminal-text">{inspectedUnit.stunTurns} TURNS REMAINING</span>
-                   </div>
+                  <Zap className="w-3 h-3 text-red-500 animate-pulse" />
+                  <div className="flex flex-col">
+                    <span className="text-[7px] font-black text-red-500 uppercase terminal-text">Systems Suppressed</span>
+                    <span className="text-[9px] font-bold text-white/80 terminal-text">{inspectedUnit.stunTurns} TURNS REMAINING</span>
+                  </div>
                 </div>
               )}
 
@@ -1135,7 +1151,7 @@ export default function SimulationScreen({ userProfile, onUpdateProfile, onBack,
                     </span>
                   </div>
                   <div className="h-1.5 bg-white/5 rounded-full overflow-hidden border border-white/5">
-                    <motion.div 
+                    <motion.div
                       initial={{ width: 0 }}
                       animate={{ width: `${(inspectedUnit.sp / inspectedUnit.maxSp) * 100}%` }}
                       className={`h-full transition-all ${inspectedUnit.isSkillActive ? 'bg-white animate-pulse' : 'bg-orange-500'}`}
@@ -1152,7 +1168,7 @@ export default function SimulationScreen({ userProfile, onUpdateProfile, onBack,
                   <p className="text-base font-black terminal-text text-white">
                     {inspectedUnit.atk}
                     {inspectedUnit.atk > (inspectedUnit.initialAtk || 0) && (
-                       <span className="text-[9px] text-rhodes-blue ml-1">↑</span>
+                      <span className="text-[9px] text-rhodes-blue ml-1">↑</span>
                     )}
                   </p>
                   <p className="text-[7px] text-white/20">BASE: {inspectedUnit.initialAtk || inspectedUnit.atk}</p>
@@ -1162,7 +1178,7 @@ export default function SimulationScreen({ userProfile, onUpdateProfile, onBack,
                   <p className="text-base font-black terminal-text text-white">
                     {inspectedUnit.def}
                     {inspectedUnit.def > (inspectedUnit.initialDef || 0) && (
-                       <span className="text-[9px] text-rhodes-blue ml-1">↑</span>
+                      <span className="text-[9px] text-rhodes-blue ml-1">↑</span>
                     )}
                   </p>
                   <p className="text-[7px] text-white/20">BASE: {inspectedUnit.initialDef || inspectedUnit.def}</p>
@@ -1174,55 +1190,54 @@ export default function SimulationScreen({ userProfile, onUpdateProfile, onBack,
                 <div className="flex items-center gap-2">
                   <div className="w-1 h-1 bg-rhodes-blue rounded-full animate-pulse" />
                   <p className="text-[10px] font-bold terminal-text text-white/80">
-                    {inspectedUnit.class === 'Vanguard' ? 
-                      (uiState.playerLP === 1 ? 'ACTIVE (CRITICAL LP)' : 'STATIC (GENERATING DP)') : 
-                     inspectedUnit.class === 'Specialist' ?
-                      'HIGH-SPEED INTERVENTION' :
-                     (['Sniper', 'Caster', 'Medic'].includes(inspectedUnit.class)) ? 
-                      '3-CYCLE FREQUENCY' : 
-                     (['Defender', 'Guard'].includes(inspectedUnit.class)) ? 
-                      '2-CYCLE FREQUENCY' : 
-                      'STANDARD FREQUENCY'}
+                    {inspectedUnit.class === 'Vanguard' ?
+                      (uiState.playerLP === 1 ? 'ACTIVE (CRITICAL LP)' : 'STATIC (GENERATING DP)') :
+                      inspectedUnit.class === 'Specialist' ?
+                        'HIGH-SPEED INTERVENTION' :
+                        (['Sniper', 'Caster', 'Medic'].includes(inspectedUnit.class)) ?
+                          '3-CYCLE FREQUENCY' :
+                          (['Defender', 'Guard'].includes(inspectedUnit.class)) ?
+                            '2-CYCLE FREQUENCY' :
+                            'STANDARD FREQUENCY'}
                   </p>
                 </div>
               </div>
 
               <div className="grid grid-cols-3 gap-1.5 shrink-0">
-                 <div className="bg-white/5 p-1.5 rounded-sm border border-white/5 flex flex-col items-center">
-                    <p className="text-[6px] text-white/30 uppercase font-black">Block</p>
-                    <p className="text-xs font-black text-white">{inspectedUnit.blockCount}</p>
-                 </div>
-                 <div className="bg-white/5 p-1.5 rounded-sm border border-white/5 flex flex-col items-center">
-                    <p className="text-[6px] text-white/30 uppercase font-black">RES</p>
-                    <p className="text-xs font-black text-white">{inspectedUnit.res}</p>
-                 </div>
-                 <div className="bg-white/5 p-1.5 rounded-sm border border-white/5 flex flex-col items-center">
-                    <p className="text-[6px] text-white/30 uppercase font-black">Coord</p>
-                    <p className="text-[9px] font-black text-rhodes-blue">{inspectedUnit.lane}:{inspectedUnit.row}</p>
-                 </div>
+                <div className="bg-white/5 p-1.5 rounded-sm border border-white/5 flex flex-col items-center">
+                  <p className="text-[6px] text-white/30 uppercase font-black">Block</p>
+                  <p className="text-xs font-black text-white">{inspectedUnit.blockCount}</p>
+                </div>
+                <div className="bg-white/5 p-1.5 rounded-sm border border-white/5 flex flex-col items-center">
+                  <p className="text-[6px] text-white/30 uppercase font-black">RES</p>
+                  <p className="text-xs font-black text-white">{inspectedUnit.res}</p>
+                </div>
+                <div className="bg-white/5 p-1.5 rounded-sm border border-white/5 flex flex-col items-center">
+                  <p className="text-[6px] text-white/30 uppercase font-black">Coord</p>
+                  <p className="text-[9px] font-black text-rhodes-blue">{inspectedUnit.lane}:{inspectedUnit.row}</p>
+                </div>
               </div>
 
               <div className="space-y-1 shrink-0">
-                 <div className="flex items-center gap-2 mb-0.5">
-                    <Star className="w-2.5 h-2.5 text-rhodes-blue" />
-                    <span className="text-[9px] font-black text-white uppercase terminal-text">{inspectedUnit.ability.title}</span>
-                 </div>
-                 <p className="text-[9px] italic text-white/50 leading-snug terminal-text pb-2">
-                    {inspectedUnit.ability.description}
-                 </p>
+                <div className="flex items-center gap-2 mb-0.5">
+                  <Star className="w-2.5 h-2.5 text-rhodes-blue" />
+                  <span className="text-[9px] font-black text-white uppercase terminal-text">{inspectedUnit.ability.title}</span>
+                </div>
+                <p className="text-[9px] italic text-white/50 leading-snug terminal-text pb-2">
+                  {inspectedUnit.ability.description}
+                </p>
               </div>
 
               {inspectedUnit.owner === 'PLAYER' && phase === 'COMMAND' && (
                 <div className="mt-auto pt-2 space-y-2 shrink-0">
                   {inspectedUnit.ability.type === 'activated' && (
-                    <button 
+                    <button
                       onClick={handleActivateSkill}
                       disabled={inspectedUnit.sp < inspectedUnit.maxSp || inspectedUnit.isSkillActive}
-                      className={`w-full rhodes-button py-2 flex items-center justify-center gap-2 ${
-                        inspectedUnit.sp >= inspectedUnit.maxSp && !inspectedUnit.isSkillActive
-                        ? 'glow-blue bg-rhodes-blue text-black'
-                        : 'opacity-40 grayscale pointer-events-none'
-                      }`}
+                      className={`w-full rhodes-button py-2 flex items-center justify-center gap-2 ${inspectedUnit.sp >= inspectedUnit.maxSp && !inspectedUnit.isSkillActive
+                          ? 'glow-blue bg-rhodes-blue text-black'
+                          : 'opacity-40 grayscale pointer-events-none'
+                        }`}
                     >
                       <Zap className={`w-3 h-3 ${inspectedUnit.isSkillActive ? 'animate-pulse' : ''}`} />
                       <span className="text-[10px] font-bold">
@@ -1230,25 +1245,24 @@ export default function SimulationScreen({ userProfile, onUpdateProfile, onBack,
                       </span>
                     </button>
                   )}
-                  <button 
+                  <button
                     onClick={handleRetreat}
                     className="w-full border border-red-500/50 text-red-500 hover:bg-red-500/10 py-2 flex items-center justify-center gap-2 rounded transition-colors"
                   >
                     <Trash2 className="w-3 h-3" />
                     <span className="text-[10px] font-bold uppercase tracking-wider">Initiate Retreat</span>
                   </button>
-                  <button 
+                  <button
                     onClick={handleInitiateSwap}
-                    className={`w-full py-2 flex items-center justify-center gap-2 rounded border transition-colors ${
-                      swapSourceId === inspectedUnit.instanceId 
-                        ? 'border-facc15 bg-facc15 text-black' 
+                    className={`w-full py-2 flex items-center justify-center gap-2 rounded border transition-colors ${swapSourceId === inspectedUnit.instanceId
+                        ? 'border-facc15 bg-facc15 text-black'
                         : 'border-rhodes-blue/50 text-rhodes-blue hover:bg-rhodes-blue/10'
-                    }`}
+                      }`}
                   >
                     <RotateCcw className="w-3 h-3" />
                     <span className="text-[10px] font-bold uppercase tracking-wider">
-                      {swapSourceId === inspectedUnit.instanceId 
-                        ? 'Awaiting Target' 
+                      {swapSourceId === inspectedUnit.instanceId
+                        ? 'Awaiting Target'
                         : `Swap Position (5 DP)`}
                     </span>
                   </button>
@@ -1261,7 +1275,7 @@ export default function SimulationScreen({ userProfile, onUpdateProfile, onBack,
         {/* Action Phase Overlay */}
         <AnimatePresence>
           {phase === 'ACTION' && (
-            <motion.div 
+            <motion.div
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
@@ -1269,7 +1283,7 @@ export default function SimulationScreen({ userProfile, onUpdateProfile, onBack,
             >
               <div className="flex flex-col items-center gap-4">
                 <div className="w-16 h-1 w-full bg-rhodes-blue/20 rounded-full overflow-hidden">
-                  <motion.div 
+                  <motion.div
                     initial={{ x: '-100%' }}
                     animate={{ x: '100%' }}
                     transition={{ repeat: Infinity, duration: 1.5, ease: "linear" }}
@@ -1284,7 +1298,7 @@ export default function SimulationScreen({ userProfile, onUpdateProfile, onBack,
 
         <AnimatePresence>
           {phase === 'ENEMY' && (
-            <motion.div 
+            <motion.div
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
@@ -1292,7 +1306,7 @@ export default function SimulationScreen({ userProfile, onUpdateProfile, onBack,
             >
               <div className="flex flex-col items-center gap-4">
                 <div className="w-16 h-1 w-full bg-red-500/20 rounded-full overflow-hidden">
-                  <motion.div 
+                  <motion.div
                     initial={{ x: '-100%' }}
                     animate={{ x: '100%' }}
                     transition={{ repeat: Infinity, duration: 1.5, ease: "linear" }}
@@ -1308,13 +1322,13 @@ export default function SimulationScreen({ userProfile, onUpdateProfile, onBack,
         {/* Execute Button */}
         <AnimatePresence>
           {phase === 'COMMAND' && (
-            <motion.div 
+            <motion.div
               initial={{ scale: 0.9, opacity: 0, y: 20 }}
               animate={{ scale: 1, opacity: 1, y: 0 }}
               exit={{ scale: 1.1, opacity: 0, y: 10 }}
               className="absolute bottom-6 right-6 z-40"
             >
-              <button 
+              <button
                 onClick={() => kernel.executeStrategy()}
                 className="rhodes-button glow-blue px-6 py-2.5 flex items-center gap-2 bg-rhodes-blue text-black font-black uppercase tracking-[0.2em] group overflow-hidden"
               >
@@ -1348,7 +1362,7 @@ export default function SimulationScreen({ userProfile, onUpdateProfile, onBack,
               animate={{ opacity: 1, scale: 1 }}
               className="absolute inset-0 flex flex-col items-center justify-center bg-black/95 z-[500] p-8 text-center backdrop-blur-xl"
             >
-              <motion.div 
+              <motion.div
                 initial={{ opacity: 0, y: 30 }}
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ delay: 0.3 }}
@@ -1360,14 +1374,14 @@ export default function SimulationScreen({ userProfile, onUpdateProfile, onBack,
                 <div className={`h-1 w-full ${winner === 'PLAYER' ? 'bg-rhodes-blue/50' : 'bg-red-500/50'} rounded-full mx-auto`} />
               </motion.div>
 
-              <motion.p 
+              <motion.p
                 initial={{ opacity: 0 }}
                 animate={{ opacity: 1 }}
                 transition={{ delay: 0.6 }}
                 className="terminal-text text-[10px] text-white/50 mb-8 tracking-widest max-w-[280px] leading-relaxed uppercase"
               >
-                {winner === 'PLAYER' 
-                  ? 'All tactical objectives secured. Field parameters satisfied. Returning to base command.' 
+                {winner === 'PLAYER'
+                  ? 'All tactical objectives secured. Field parameters satisfied. Returning to base command.'
                   : 'System integrity compromised. Deployment force eliminated. Initiating emergency neural decoupling.'}
               </motion.p>
 
@@ -1395,11 +1409,11 @@ export default function SimulationScreen({ userProfile, onUpdateProfile, onBack,
                 </motion.div>
               )}
 
-              <motion.button 
+              <motion.button
                 initial={{ opacity: 0, scale: 0.8 }}
                 animate={{ opacity: 1, scale: 1 }}
                 transition={{ delay: 0.9 }}
-                onClick={onBack} 
+                onClick={onBack}
                 className={`rhodes-button px-16 py-4 font-black terminal-text text-sm ${winner === 'PLAYER' ? 'glow-blue text-rhodes-blue' : 'border-red-500 text-red-500 glow-orange'}`}
               >
                 DISCONNECT LINK
@@ -1428,24 +1442,23 @@ export default function SimulationScreen({ userProfile, onUpdateProfile, onBack,
 
               <div className="flex justify-center gap-1.5 mb-8 w-full">
                 {playerHand.map((op, idx) => (
-                  <motion.div 
+                  <motion.div
                     key={op.id}
                     whileHover={{ scale: 1.05 }}
                     whileTap={{ scale: 0.95 }}
                     onClick={() => toggleMulliganSelection(idx)}
-                    className={`w-[18vw] max-w-[80px] aspect-[2/3] border-2 rounded-sm relative overflow-hidden transition-all cursor-pointer ${
-                      mulliganSelected.includes(idx) 
-                      ? 'border-red-500 shadow-[0_0_15px_rgba(239,68,68,0.3)]' 
-                      : 'border-white/10 hover:border-rhodes-blue/50'
-                    }`}
+                    className={`w-[18vw] max-w-[80px] aspect-[2/3] border-2 rounded-sm relative overflow-hidden transition-all cursor-pointer ${mulliganSelected.includes(idx)
+                        ? 'border-red-500 shadow-[0_0_15px_rgba(239,68,68,0.3)]'
+                        : 'border-white/10 hover:border-rhodes-blue/50'
+                      }`}
                   >
-                    <img 
+                    <img
                       src={getCardImagePath(op)}
                       alt={op.name}
                       className={`w-full h-full object-contain transition-all ${mulliganSelected.includes(idx) ? 'opacity-20 grayscale brightness-50' : 'opacity-70 grayscale-[0.2]'}`}
                       referrerPolicy="no-referrer"
                     />
-                    
+
                     {mulliganSelected.includes(idx) && (
                       <div className="absolute inset-0 flex flex-col items-center justify-center bg-red-500/10 z-30">
                         <RotateCcw className="w-6 h-6 text-red-500 animate-spin-slow" />
@@ -1457,12 +1470,11 @@ export default function SimulationScreen({ userProfile, onUpdateProfile, onBack,
               </div>
 
               <div className="flex flex-col items-center gap-4">
-                <button 
+                <button
                   onClick={handleConfirmMulligan}
                   disabled={mulliganSelected.length === 0}
-                  className={`rhodes-button px-10 py-2.5 group relative overflow-hidden transition-all ${
-                    mulliganSelected.length > 0 ? 'glow-blue border-rhodes-blue/50' : 'opacity-20 grayscale border-white/10'
-                  }`}
+                  className={`rhodes-button px-10 py-2.5 group relative overflow-hidden transition-all ${mulliganSelected.length > 0 ? 'glow-blue border-rhodes-blue/50' : 'opacity-20 grayscale border-white/10'
+                    }`}
                 >
                   <div className="absolute inset-0 bg-white/5 translate-x-[-100%] group-hover:translate-x-[100%] transition-transform duration-700" />
                   <div className="flex items-center gap-2">
@@ -1473,14 +1485,14 @@ export default function SimulationScreen({ userProfile, onUpdateProfile, onBack,
                   </div>
                 </button>
 
-                <button 
+                <button
                   onClick={() => setMulliganPhase(false)}
                   className="terminal-text text-[8px] text-white/30 hover:text-white transition-colors tracking-[0.3em] font-bold uppercase"
                 >
                   Skip & Start Operation
                 </button>
               </div>
-              
+
               <p className="mt-6 text-[7px] terminal-text text-white/20 uppercase tracking-[0.2em] max-w-[200px] text-center leading-relaxed">
                 Selective recycling enables tactical optimization of your initial deployment link.
               </p>
@@ -1500,15 +1512,14 @@ export default function SimulationScreen({ userProfile, onUpdateProfile, onBack,
                 <span className="text-[5px] terminal-text text-white/20 uppercase font-bold">DP</span>
               </div>
             </div>
-            
-            <button 
+
+            <button
               onClick={handleDrawCard}
               disabled={playerHand.length >= 6 || uiState.playerDP < 5 || playerDeck.length === 0 || phase !== 'COMMAND'}
-              className={`rhodes-button h-8 px-3 py-0 flex flex-col items-center justify-center transition-all ${
-                playerHand.length < 6 && uiState.playerDP >= 5 && playerDeck.length > 0 && phase === 'COMMAND'
-                ? 'glow-blue border-rhodes-blue/50 text-rhodes-blue'
-                : 'border-white/5 text-white/10 opacity-50 grayscale'
-              }`}
+              className={`rhodes-button h-8 px-3 py-0 flex flex-col items-center justify-center transition-all ${playerHand.length < 6 && uiState.playerDP >= 5 && playerDeck.length > 0 && phase === 'COMMAND'
+                  ? 'glow-blue border-rhodes-blue/50 text-rhodes-blue'
+                  : 'border-white/5 text-white/10 opacity-50 grayscale'
+                }`}
             >
               <div className="flex items-center gap-1.5">
                 <span className="text-[8px] font-black uppercase tracking-tighter">Supply</span>
@@ -1516,7 +1527,7 @@ export default function SimulationScreen({ userProfile, onUpdateProfile, onBack,
               </div>
             </button>
           </div>
-          
+
           <div className="flex items-center gap-2">
             <div className="hidden sm:flex flex-col items-end">
               <span className="text-[6px] text-rhodes-blue/40 terminal-text uppercase">Deck: {playerDeck.length}</span>
@@ -1530,20 +1541,19 @@ export default function SimulationScreen({ userProfile, onUpdateProfile, onBack,
               <div
                 onMouseDown={(e) => handleDragStart(op, idx, e)}
                 onTouchStart={(e) => handleDragStart(op, idx, e)}
-                className={`w-16 h-24 border rounded-sm relative overflow-hidden group transition-all cursor-grab active:cursor-grabbing ${
-                  uiState.playerDP >= op.dp_cost && phase === 'COMMAND'
+                className={`w-16 h-24 border rounded-sm relative overflow-hidden group transition-all cursor-grab active:cursor-grabbing ${uiState.playerDP >= op.dp_cost && phase === 'COMMAND'
                     ? 'border-rhodes-blue/40 bg-rhodes-blue/5 shadow-inner'
                     : 'border-white/5 bg-white/5 opacity-50 grayscale'
-                } ${draggingOp?.index === idx ? 'opacity-0 scale-95' : ''}`}
+                  } ${draggingOp?.index === idx ? 'opacity-0 scale-95' : ''}`}
               >
-                
-                <img 
+
+                <img
                   src={getCardImagePath(op)}
                   alt={op.name}
                   className="w-full h-full object-contain opacity-70 group-hover:opacity-100 transition-opacity"
                   referrerPolicy="no-referrer"
                 />
-                
+
                 {/* DP Badge */}
                 <div className="absolute top-0.5 right-0.5 bg-black/80 px-1 py-0.5 rounded-sm border border-rhodes-blue/20 z-20">
                   <span className="text-[8px] font-black terminal-text text-rhodes-blue">{op.dp_cost}</span>
@@ -1559,20 +1569,20 @@ export default function SimulationScreen({ userProfile, onUpdateProfile, onBack,
           {playerCooldowns.map((c, idx) => (
             <div key={`cooldown-${c.op.id}-${idx}`} className="flex flex-col gap-1 shrink-0">
               <div className="w-16 h-24 border border-white/5 bg-black/80 rounded-sm relative overflow-hidden group opacity-60">
-                 <img 
+                <img
                   src={getCardImagePath(c.op)}
                   alt={c.op.name}
                   className="w-full h-full object-contain grayscale brightness-50 opacity-40"
                   referrerPolicy="no-referrer"
                 />
                 <div className="absolute inset-0 flex flex-col items-center justify-center gap-1">
-                   <RotateCcw className="w-4 h-4 text-white/20 animate-spin-slow" />
-                   <div className="bg-rhodes-blue/20 px-2 py-0.5 rounded-full border border-rhodes-blue/40">
-                      <span className="text-[10px] font-black terminal-text text-rhodes-blue">{c.turnsRemaining}T</span>
-                   </div>
+                  <RotateCcw className="w-4 h-4 text-white/20 animate-spin-slow" />
+                  <div className="bg-rhodes-blue/20 px-2 py-0.5 rounded-full border border-rhodes-blue/40">
+                    <span className="text-[10px] font-black terminal-text text-rhodes-blue">{c.turnsRemaining}T</span>
+                  </div>
                 </div>
                 <div className="absolute inset-x-0 bottom-0 bg-black/90 p-1 border-t border-white/5">
-                   <p className="text-[5px] text-white/40 terminal-text text-center font-bold uppercase tracking-tighter">RECOVERING</p>
+                  <p className="text-[5px] text-white/40 terminal-text text-center font-bold uppercase tracking-tighter">RECOVERING</p>
                 </div>
               </div>
             </div>
@@ -1590,62 +1600,62 @@ export default function SimulationScreen({ userProfile, onUpdateProfile, onBack,
       {/* Victory/Defeat Overlay */}
       <AnimatePresence>
         {winner && (
-          <motion.div 
-            initial={{ opacity: 0 }} 
-            animate={{ opacity: 1 }} 
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
             className="absolute inset-0 z-[1000] bg-black/90 flex flex-col items-center justify-center backdrop-blur-xl"
           >
-             <motion.div 
-               initial={{ scale: 0.8, opacity: 0 }} 
-               animate={{ scale: 1, opacity: 1 }} 
-               transition={{ delay: 0.5, type: 'spring' }} 
-               className="flex flex-col items-center"
-             >
-                <div className="relative mb-8">
-                  <div className={`text-7xl font-black italic tracking-tighter ${winner === 'PLAYER' ? 'text-rhodes-blue' : 'text-red-600'} drop-shadow-[0_0_30px_rgba(0,186,255,0.5)]`}>
-                    {winner === 'PLAYER' ? 'VICTORY' : 'DEFEAT'}
-                  </div>
-                  <div className="absolute -bottom-2 right-0 bg-white text-black text-[10px] font-black px-2 py-0.5 terminal-text uppercase">
-                    Simulation {winner === 'PLAYER' ? 'Success' : 'Terminated'}
-                  </div>
+            <motion.div
+              initial={{ scale: 0.8, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              transition={{ delay: 0.5, type: 'spring' }}
+              className="flex flex-col items-center"
+            >
+              <div className="relative mb-8">
+                <div className={`text-7xl font-black italic tracking-tighter ${winner === 'PLAYER' ? 'text-rhodes-blue' : 'text-red-600'} drop-shadow-[0_0_30px_rgba(0,186,255,0.5)]`}>
+                  {winner === 'PLAYER' ? 'VICTORY' : 'DEFEAT'}
                 </div>
+                <div className="absolute -bottom-2 right-0 bg-white text-black text-[10px] font-black px-2 py-0.5 terminal-text uppercase">
+                  Simulation {winner === 'PLAYER' ? 'Success' : 'Terminated'}
+                </div>
+              </div>
 
-                <div className="terminal-text text-[10px] text-white/40 uppercase tracking-[0.5em] mb-12 text-center max-w-[300px]">
-                  {winner === 'PLAYER' 
-                    ? "Neural link synchronization complete. Tactical objectives achieved." 
-                    : "Neural link integrity compromised. Aborting simulation sequence."}
-                </div>
+              <div className="terminal-text text-[10px] text-white/40 uppercase tracking-[0.5em] mb-12 text-center max-w-[300px]">
+                {winner === 'PLAYER'
+                  ? "Neural link synchronization complete. Tactical objectives achieved."
+                  : "Neural link integrity compromised. Aborting simulation sequence."}
+              </div>
 
-                <div className="flex flex-col gap-4 w-full max-w-[200px]">
-                  <button 
-                    onClick={onBack} 
-                    className="rhodes-button glow-blue w-full py-4 bg-rhodes-blue text-black font-black terminal-text text-xs uppercase tracking-widest"
-                  >
-                    Return to Terminal
-                  </button>
-                  <button 
-                    onClick={() => window.location.reload()} 
-                    className="text-[10px] text-white/20 hover:text-white terminal-text uppercase transition-colors"
-                  >
-                    [ REINITIALIZE SIMULATION ]
-                  </button>
-                </div>
-             </motion.div>
+              <div className="flex flex-col gap-4 w-full max-w-[200px]">
+                <button
+                  onClick={onBack}
+                  className="rhodes-button glow-blue w-full py-4 bg-rhodes-blue text-black font-black terminal-text text-xs uppercase tracking-widest"
+                >
+                  Return to Terminal
+                </button>
+                <button
+                  onClick={() => window.location.reload()}
+                  className="text-[10px] text-white/20 hover:text-white terminal-text uppercase transition-colors"
+                >
+                  [ REINITIALIZE SIMULATION ]
+                </button>
+              </div>
+            </motion.div>
           </motion.div>
         )}
       </AnimatePresence>
 
       {/* Dragging Ghost */}
       {draggingOp && (
-        <div 
+        <div
           className="fixed pointer-events-none z-[1000] w-16 h-24 border border-rhodes-blue bg-rhodes-blue/20 rounded overflow-hidden"
-          style={{ 
-            left: dragPos.x - 32, 
+          style={{
+            left: dragPos.x - 32,
             top: dragPos.y - 48,
             transform: 'scale(1.1)'
           }}
         >
-          <img 
+          <img
             src={getCardImagePath(draggingOp.op)}
             alt={draggingOp.op.name}
             className="w-full h-full object-contain opacity-90"
